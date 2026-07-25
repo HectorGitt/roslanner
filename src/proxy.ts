@@ -25,6 +25,7 @@ export const config = {
     "/dashboard/:path*",
     "/wards/:path*",
     "/roles/:path*",
+    "/tiers/:path*",
     "/leave/:path*",
     "/rosters/:path*",
     "/settings/:path*",

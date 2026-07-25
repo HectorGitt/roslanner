@@ -9,7 +9,7 @@ cell with live violation checking.
 
 ```bash
 npm install
-npm run db:push    # create the schema in your Postgres database
+npm run db:deploy  # apply migrations to your Postgres database
 npm run db:seed    # optional: demo hospital, wards, staff, coverage, leave
 npm run dev        # http://localhost:3000
 ```

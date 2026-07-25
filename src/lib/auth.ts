@@ -4,17 +4,13 @@ import { prisma } from "@/lib/db";
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "postgresql" }),
-  // Local dev runs on varying ports/hosts — trust them all so the
-  // origin check doesn't reject sign-in when the port differs from
-  // BETTER_AUTH_URL. Add your production URL here when deploying.
-  trustedOrigins: [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://localhost:3002",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-    "http://127.0.0.1:3002",
-  ],
+  // In dev the app runs on whatever port is free, so trust any localhost
+  // origin rather than maintaining a port list. In production only the
+  // configured app URL is trusted.
+  trustedOrigins:
+    process.env.NODE_ENV === "production"
+      ? [process.env.BETTER_AUTH_URL ?? ""].filter(Boolean)
+      : ["http://localhost:*", "http://127.0.0.1:*"],
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,

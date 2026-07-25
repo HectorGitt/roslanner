@@ -4,36 +4,28 @@ import { requireHospitalUser } from "@/lib/session";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: NextRequest, { params }: Params) {
-  const guard = await requireHospitalUser();
-  if (guard.response) return guard.response;
-
-  const { id } = await params;
-  const ward = await prisma.ward.findFirst({
-    where: { id, hospitalId: guard.user.hospitalId },
-    include: {
-      staff: { include: { role: true, tier: true }, orderBy: { name: "asc" } },
-      requirements: true,
-      rules: true,
-      shiftDefinitions: { orderBy: { sortOrder: "asc" } },
-    },
-  });
-  if (!ward) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(ward);
-}
-
 export async function PATCH(req: NextRequest, { params }: Params) {
   const guard = await requireHospitalUser();
   if (guard.response) return guard.response;
 
   const { id } = await params;
-  const { name } = await req.json();
-  const { count } = await prisma.ward.updateMany({
+  const { name, rank, countsTowardClinicalCoverage, maxConsecutiveNights } = await req.json();
+  const { count } = await prisma.staffTier.updateMany({
     where: { id, hospitalId: guard.user.hospitalId },
-    data: { name },
+    data: {
+      ...(name !== undefined ? { name } : {}),
+      ...(rank !== undefined ? { rank: Number(rank) } : {}),
+      ...(countsTowardClinicalCoverage !== undefined
+        ? { countsTowardClinicalCoverage: Boolean(countsTowardClinicalCoverage) }
+        : {}),
+      ...(maxConsecutiveNights !== undefined
+        ? { maxConsecutiveNights: maxConsecutiveNights === null ? null : Number(maxConsecutiveNights) }
+        : {}),
+    },
   });
   if (count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({ ok: true });
+  const tier = await prisma.staffTier.findUnique({ where: { id } });
+  return NextResponse.json(tier);
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
@@ -41,7 +33,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   if (guard.response) return guard.response;
 
   const { id } = await params;
-  const { count } = await prisma.ward.deleteMany({
+  const { count } = await prisma.staffTier.deleteMany({
     where: { id, hospitalId: guard.user.hospitalId },
   });
   if (count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });

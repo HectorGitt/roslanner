@@ -10,13 +10,14 @@ datasource db {
 // ===== Tenancy & auth =====
 
 model Hospital {
-  id         String   @id @default(cuid())
+  id         String      @id @default(cuid())
   name       String
-  inviteCode String   @unique
+  inviteCode String      @unique
   users      User[]
   wards      Ward[]
   roles      Role[]
-  createdAt  DateTime @default(now())
+  tiers      StaffTier[]
+  createdAt  DateTime    @default(now())
 }
 
 // Better Auth managed models (user/session/account/verification)
@@ -85,17 +86,86 @@ model Verification {
 // ===== Rostering =====
 
 model Ward {
-  id           String                @id @default(cuid())
-  name         String
-  hospitalId   String
-  hospital     Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
-  requirements CoverageRequirement[]
-  staff        Staff[]
-  rosters      Roster[]
-  rules        RuleSet?
-  createdAt    DateTime              @default(now())
+  id              String                @id @default(cuid())
+  name            String
+  hospitalId      String
+  hospital        Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  requirements    CoverageRequirement[]
+  staff           Staff[]
+  rosters         Roster[]
+  rules           RuleSet?
+  shiftDefinitions ShiftDefinition[]
+  createdAt       DateTime              @default(now())
 
   @@unique([hospitalId, name])
+}
+
+// A configurable shift for a ward — replaces the assumption that every ward
+// uses Morning/Afternoon/Night. Existing wards get these three backfilled
+// automatically so nothing changes until an admin configures otherwise.
+model ShiftDefinition {
+  id              String   @id @default(cuid())
+  wardId          String
+  ward            Ward     @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  code            String   // stable short code, e.g. "MORNING", "CALL_DUTY"
+  label           String   // hospital's own display name
+  startMinutes    Int
+  endMinutes      Int
+  crossesMidnight Boolean  @default(false)
+  isNightLike     Boolean  @default(false)
+  payrollTag      String?
+  sortOrder       Int      @default(0)
+  tierEligibility TierShiftEligibility[]
+  pairingRules    TierPairingRule[]
+
+  @@unique([wardId, code])
+}
+
+// ===== Staff tiers (hospital-defined hierarchy) =====
+
+model StaffTier {
+  id                           String   @id @default(cuid())
+  hospitalId                   String
+  hospital                     Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  name                         String
+  rank                         Int      @default(0)
+  countsTowardClinicalCoverage Boolean  @default(true)
+  maxConsecutiveNights         Int?
+  staff                        Staff[]
+  shiftEligibility             TierShiftEligibility[]
+  requiredPairingsAsDependent  TierPairingRule[] @relation("Dependent")
+  requiredPairingsAsRequired   TierPairingRule[] @relation("Required")
+  createdAt                    DateTime @default(now())
+
+  @@unique([hospitalId, name])
+}
+
+// Per-tier, per-shift eligibility (e.g. Tier 1 = Morning only, never weekends/holidays).
+model TierShiftEligibility {
+  id              String          @id @default(cuid())
+  tierId          String
+  tier            StaffTier       @relation(fields: [tierId], references: [id], onDelete: Cascade)
+  shiftDefId      String
+  shiftDef        ShiftDefinition @relation(fields: [shiftDefId], references: [id], onDelete: Cascade)
+  eligible        Boolean         @default(true)
+  weekendEligible Boolean         @default(true)
+  holidayEligible Boolean         @default(true)
+
+  @@unique([tierId, shiftDefId])
+}
+
+// "Tier 3 must always have >=N of Tier 2 present" style pairing requirement.
+model TierPairingRule {
+  id               String           @id @default(cuid())
+  dependentTierId  String
+  dependentTier    StaffTier        @relation("Dependent", fields: [dependentTierId], references: [id], onDelete: Cascade)
+  requiredTierId   String
+  requiredTier     StaffTier        @relation("Required", fields: [requiredTierId], references: [id], onDelete: Cascade)
+  minRequiredCount Int              @default(1)
+  shiftDefId       String?          // null = applies to every shift
+  shiftDef         ShiftDefinition? @relation(fields: [shiftDefId], references: [id], onDelete: Cascade)
+
+  @@unique([dependentTierId, requiredTierId, shiftDefId])
 }
 
 model Role {
@@ -116,6 +186,10 @@ model Staff {
   role          Role           @relation(fields: [roleId], references: [id], onDelete: Restrict)
   wardId        String
   ward          Ward           @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  tierId        String?
+  tier          StaffTier?     @relation(fields: [tierId], references: [id], onDelete: SetNull)
+  fte           Float          @default(1.0)
+  canBeLead     Boolean        @default(false)
   active        Boolean        @default(true)
   leaveRequests LeaveRequest[]
   assignments   Assignment[]

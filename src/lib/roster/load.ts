@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { CoverageReq, OffDay, Shift, SolverInput } from "./types";
+import { CoverageReq, OffDay, Shift, SolverInput, TierInfo, TierPairing } from "./types";
 
 const DEFAULT_RULES = {
   maxConsecutiveDays: 6,
@@ -15,15 +15,56 @@ export async function loadSolverInput(
   startDate: Date,
   days: number,
 ): Promise<SolverInput> {
-  const [staff, requirements, ruleSet] = await Promise.all([
+  const ward = await prisma.ward.findUniqueOrThrow({
+    where: { id: wardId },
+    select: { hospitalId: true },
+  });
+
+  const [staff, requirements, ruleSet, shiftDefs, tiersRaw, pairingsRaw] = await Promise.all([
     prisma.staff.findMany({
       where: { wardId, active: true },
-      include: { role: true },
+      include: { role: true, tier: true },
       orderBy: [{ role: { name: "asc" } }, { name: "asc" }],
     }),
     prisma.coverageRequirement.findMany({ where: { wardId } }),
     prisma.ruleSet.findUnique({ where: { wardId } }),
+    prisma.shiftDefinition.findMany({ where: { wardId } }),
+    prisma.staffTier.findMany({
+      where: { hospitalId: ward.hospitalId },
+      include: { shiftEligibility: true },
+    }),
+    prisma.tierPairingRule.findMany({
+      where: { dependentTier: { hospitalId: ward.hospitalId } },
+    }),
   ]);
+
+  // Tier shift-eligibility/pairing rows are keyed by shiftDefId, which is
+  // ward-specific — resolve back to the shift code this ward uses.
+  const shiftCodeById = new Map(shiftDefs.map((sd) => [sd.id, sd.code as Shift]));
+
+  const tiers: TierInfo[] = tiersRaw.map((t) => ({
+    id: t.id,
+    name: t.name,
+    countsTowardClinicalCoverage: t.countsTowardClinicalCoverage,
+    maxConsecutiveNights: t.maxConsecutiveNights,
+    shiftRules: t.shiftEligibility
+      .filter((e) => shiftCodeById.has(e.shiftDefId))
+      .map((e) => ({
+        shift: shiftCodeById.get(e.shiftDefId)!,
+        eligible: e.eligible,
+        weekendEligible: e.weekendEligible,
+        holidayEligible: e.holidayEligible,
+      })),
+  }));
+
+  const tierPairings: TierPairing[] = pairingsRaw
+    .filter((p) => !p.shiftDefId || shiftCodeById.has(p.shiftDefId))
+    .map((p) => ({
+      dependentTierId: p.dependentTierId,
+      requiredTierId: p.requiredTierId,
+      minRequiredCount: p.minRequiredCount,
+      shift: p.shiftDefId ? shiftCodeById.get(p.shiftDefId) : undefined,
+    }));
 
   const staffIds = staff.map((s) => s.id);
   const periodEnd = addDays(startDate, days); // exclusive
@@ -57,10 +98,16 @@ export async function loadSolverInput(
       name: s.name,
       roleId: s.roleId,
       roleName: s.role.name,
+      tierId: s.tierId ?? undefined,
+      tierName: s.tier?.name,
+      fte: s.fte,
+      canBeLead: s.canBeLead,
     })),
     coverage,
     rules: ruleSet ?? DEFAULT_RULES,
     offDays,
+    tiers,
+    tierPairings,
   };
 }
 

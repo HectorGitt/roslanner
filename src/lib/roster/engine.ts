@@ -35,7 +35,8 @@ export function isWeekend(startDate: string, dayIndex: number): boolean {
  */
 export function evaluate(input: SolverInput, grid: Grid): Evaluation {
   const violations: Violation[] = [];
-  const { days, staff, coverage, rules, offDays, startDate } = input;
+  const { days, staff, coverage, rules, offDays, startDate, tiers, tierPairings } = input;
+  const tierById = new Map(tiers.map((t) => [t.id, t]));
 
   // --- Coverage per day/shift/role ---
   for (let d = 0; d < days; d++) {
@@ -56,6 +57,32 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
           message: `Day ${d + 1}: ${req.shift.toLowerCase()} needs ${req.required}, has ${have} (${roleName(input, req.roleId)})`,
           dayIndexes: [d],
         });
+      }
+    }
+
+    // --- Tier pairing ("Tier 3 must always have >=N Tier 2 present") ---
+    if (tierPairings.length > 0) {
+      for (const shift of SHIFTS) {
+        const tierCounts = new Map<string, number>();
+        for (let s = 0; s < staff.length; s++) {
+          if (grid[s][d] !== shift || !staff[s].tierId) continue;
+          const tid = staff[s].tierId!;
+          tierCounts.set(tid, (tierCounts.get(tid) ?? 0) + 1);
+        }
+        for (const p of tierPairings) {
+          if (p.shift && p.shift !== shift) continue;
+          const dependentPresent = (tierCounts.get(p.dependentTierId) ?? 0) > 0;
+          if (!dependentPresent) continue;
+          const requiredPresent = tierCounts.get(p.requiredTierId) ?? 0;
+          if (requiredPresent < p.minRequiredCount) {
+            violations.push({
+              type: "TIER_PAIRING_UNMET",
+              severity: "HARD",
+              message: `Day ${d + 1}: ${shift.toLowerCase()} has ${tierName(input, p.dependentTierId)} without ${p.minRequiredCount > 1 ? `${p.minRequiredCount}x ` : ""}${tierName(input, p.requiredTierId)} present`,
+              dayIndexes: [d],
+            });
+          }
+        }
       }
     }
   }
@@ -109,6 +136,36 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
       }
     }
 
+    // Tier shift eligibility (e.g. Tier 1 = Morning only, never weekends)
+    const tier = staff[s].tierId ? tierById.get(staff[s].tierId!) : undefined;
+    if (tier) {
+      const shiftRuleByShift = new Map(tier.shiftRules.map((r) => [r.shift, r]));
+      for (let d = 0; d < days; d++) {
+        const v = row[d];
+        if (!isWorkShift(v)) continue;
+        const shiftRule = shiftRuleByShift.get(v);
+        const weekend = isWeekend(startDate, d);
+        if (shiftRule?.eligible === false) {
+          violations.push({
+            type: "TIER_SHIFT_INELIGIBLE",
+            severity: "HARD",
+            message: `${name} (${tier.name}) isn't eligible for ${v.toLowerCase()} shifts (day ${d + 1})`,
+            staffId: staff[s].id,
+            dayIndexes: [d],
+          });
+        } else if (weekend && shiftRule?.weekendEligible === false) {
+          violations.push({
+            type: "TIER_SHIFT_INELIGIBLE",
+            severity: "HARD",
+            message: `${name} (${tier.name}) isn't eligible for weekend shifts (day ${d + 1})`,
+            staffId: staff[s].id,
+            dayIndexes: [d],
+          });
+        }
+      }
+    }
+    const effectiveMaxNights = tier?.maxConsecutiveNights ?? rules.maxConsecutiveNights;
+
     // Consecutive working days / nights
     let run = 0;
     let nightRun = 0;
@@ -130,11 +187,11 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
       }
       if (night) nightRun++;
       else {
-        if (nightRun > rules.maxConsecutiveNights) {
+        if (nightRun > effectiveMaxNights) {
           violations.push({
             type: "MAX_CONSECUTIVE_NIGHTS",
             severity: "HARD",
-            message: `${name}: ${nightRun} consecutive nights (max ${rules.maxConsecutiveNights})`,
+            message: `${name}: ${nightRun} consecutive nights (max ${effectiveMaxNights})`,
             staffId: staff[s].id,
             dayIndexes: range(d - nightRun, d),
           });
@@ -183,10 +240,30 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     list.push(i);
     byRole.set(st.roleId, list);
   });
-  for (const [roleId, idxs] of byRole.entries()) {
+  // Staff a tier bars from a shift (or from weekends) are excluded from that
+  // fairness pool — otherwise a morning-only senior looks permanently
+  // "short of nights" and the solver burns effort chasing an impossible fix.
+  const shiftEligible = (sIdx: number, shift: Shift): boolean => {
+    const tierId = staff[sIdx].tierId;
+    const t = tierId ? tierById.get(tierId) : undefined;
+    if (!t) return true;
+    return t.shiftRules.find((r) => r.shift === shift)?.eligible ?? true;
+  };
+  const weekendEligible = (sIdx: number): boolean => {
+    const tierId = staff[sIdx].tierId;
+    const t = tierId ? tierById.get(tierId) : undefined;
+    if (!t || t.shiftRules.length === 0) return true;
+    return t.shiftRules.some((r) => r.eligible && r.weekendEligible);
+  };
+
+  for (const idxs of byRole.values()) {
     if (idxs.length < 2) continue;
-    const nights = idxs.map((i) => countIn(grid[i], "NIGHT"));
-    const weekends = idxs.map((i) =>
+
+    const nightPool = idxs.filter((i) => shiftEligible(i, "NIGHT"));
+    const weekendPool = idxs.filter(weekendEligible);
+
+    const nights = nightPool.map((i) => countIn(grid[i], "NIGHT"));
+    const weekends = weekendPool.map((i) =>
       grid[i].reduce(
         (acc, v, d) => acc + (isWorkShift(v) && isWeekend(startDate, d) ? 1 : 0),
         0,
@@ -194,43 +271,48 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     );
     const totals = idxs.map((i) => grid[i].filter(isWorkShift).length);
     fairnessCost +=
-      spread(nights) * 3 + spread(weekends) * 2 + spread(totals) * 2;
+      (nights.length > 1 ? spread(nights) * 3 : 0) +
+      (weekends.length > 1 ? spread(weekends) * 2 : 0) +
+      spread(totals) * 2;
 
-    const meanNights = nights.reduce((a, b) => a + b, 0) / nights.length;
-    const meanWeekends = weekends.reduce((a, b) => a + b, 0) / weekends.length;
-    const meanTotals = totals.reduce((a, b) => a + b, 0) / totals.length;
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    const meanTotals = mean(totals);
 
+    if (nights.length > 1) {
+      const meanNights = mean(nights);
+      nightPool.forEach((sIdx, localIdx) => {
+        if (Math.abs(nights[localIdx] - meanNights) > 0.8) {
+          violations.push({
+            type: "UNFAIR_SHARE",
+            severity: "SOFT",
+            message: `${staff[sIdx].name}: ${nights[localIdx]} nights (average ${meanNights.toFixed(1)})`,
+            staffId: staff[sIdx].id,
+            dayIndexes: [],
+          });
+        }
+      });
+    }
+    if (weekends.length > 1) {
+      const meanWeekends = mean(weekends);
+      weekendPool.forEach((sIdx, localIdx) => {
+        if (Math.abs(weekends[localIdx] - meanWeekends) > 0.8) {
+          violations.push({
+            type: "UNFAIR_SHARE",
+            severity: "SOFT",
+            message: `${staff[sIdx].name}: ${weekends[localIdx]} weekend shifts (average ${meanWeekends.toFixed(1)})`,
+            staffId: staff[sIdx].id,
+            dayIndexes: [],
+          });
+        }
+      });
+    }
     idxs.forEach((sIdx, localIdx) => {
-      const st = staff[sIdx];
-      const n = nights[localIdx];
-      const w = weekends[localIdx];
-      const t = totals[localIdx];
-      
-      // Highly sensitive fairness warnings
-      if (Math.abs(n - meanNights) > 0.8) {
+      if (Math.abs(totals[localIdx] - meanTotals) > 1.5) {
         violations.push({
           type: "UNFAIR_SHARE",
           severity: "SOFT",
-          message: `${st.name}: ${n} nights (average ${meanNights.toFixed(1)})`,
-          staffId: st.id,
-          dayIndexes: [],
-        });
-      }
-      if (Math.abs(w - meanWeekends) > 0.8) {
-        violations.push({
-          type: "UNFAIR_SHARE",
-          severity: "SOFT",
-          message: `${st.name}: ${w} weekend shifts (average ${meanWeekends.toFixed(1)})`,
-          staffId: st.id,
-          dayIndexes: [],
-        });
-      }
-      if (Math.abs(t - meanTotals) > 1.5) {
-        violations.push({
-          type: "UNFAIR_SHARE",
-          severity: "SOFT",
-          message: `${st.name}: ${t} total shifts (average ${meanTotals.toFixed(1)})`,
-          staffId: st.id,
+          message: `${staff[sIdx].name}: ${totals[localIdx]} total shifts (average ${meanTotals.toFixed(1)})`,
+          staffId: staff[sIdx].id,
           dayIndexes: [],
         });
       }
@@ -253,6 +335,10 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
 
 function roleName(input: SolverInput, roleId: string): string {
   return input.staff.find((s) => s.roleId === roleId)?.roleName ?? "staff";
+}
+
+function tierName(input: SolverInput, tierId: string): string {
+  return input.tiers.find((t) => t.id === tierId)?.name ?? "tier";
 }
 
 function countIn(row: CellValue[], v: CellValue): number {

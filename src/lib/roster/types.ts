@@ -10,6 +10,36 @@ export interface SolverStaff {
   name: string;
   roleId: string;
   roleName: string;
+  tierId?: string;
+  tierName?: string;
+  fte: number;
+  canBeLead: boolean;
+}
+
+/** Per-shift eligibility for a tier (weekend/holiday flags only apply when eligible=true). */
+export interface TierShiftRule {
+  shift: Shift;
+  eligible: boolean;
+  weekendEligible: boolean;
+  holidayEligible: boolean;
+}
+
+export interface TierInfo {
+  id: string;
+  name: string;
+  countsTowardClinicalCoverage: boolean;
+  /** Overrides the ward's Rules.maxConsecutiveNights for staff in this tier, if set. */
+  maxConsecutiveNights: number | null;
+  shiftRules: TierShiftRule[];
+}
+
+/** "Whenever a dependentTier staffer works a shift, at least minRequiredCount of requiredTier must also be on it." */
+export interface TierPairing {
+  dependentTierId: string;
+  requiredTierId: string;
+  minRequiredCount: number;
+  /** undefined = applies to every shift. */
+  shift?: Shift;
 }
 
 export interface CoverageReq {
@@ -41,6 +71,8 @@ export interface SolverInput {
   coverage: CoverageReq[];
   rules: Rules;
   offDays: OffDay[];
+  tiers: TierInfo[];
+  tierPairings: TierPairing[];
 }
 
 /** grid[staffIndex][dayIndex] — staff order matches input.staff. */
@@ -55,7 +87,9 @@ export type ViolationType =
   | "MAX_NIGHTS_PER_WEEK"
   | "MIN_DAYS_OFF_PER_WEEK"
   | "DO_REQUEST_UNMET"
-  | "UNFAIR_SHARE";
+  | "UNFAIR_SHARE"
+  | "TIER_SHIFT_INELIGIBLE"
+  | "TIER_PAIRING_UNMET";
 
 export interface Violation {
   type: ViolationType;

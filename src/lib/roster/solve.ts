@@ -1,4 +1,4 @@
-import { evaluate, isWorkShift } from "./engine";
+import { evaluate, isWeekend, isWorkShift } from "./engine";
 import {
   CellValue,
   Grid,
@@ -91,8 +91,9 @@ function buildRoleMates(input: SolverInput): number[][] {
 }
 
 function greedyConstruct(input: SolverInput): Grid {
-  const { days, staff, coverage, rules } = input;
+  const { days, staff, coverage, rules, tiers, startDate } = input;
   const grid: Grid = staff.map(() => Array<CellValue>(days).fill("DO"));
+  const tierById = new Map(tiers.map((t) => [t.id, t]));
 
   const hardOff = new Set<string>();
   const softOff = new Set<string>();
@@ -128,9 +129,16 @@ function greedyConstruct(input: SolverInput): Grid {
               return false;
             if (consecutiveDaysEndingBefore(grid[i], d) >= rules.maxConsecutiveDays)
               return false;
+            const tier = st.tierId ? tierById.get(st.tierId) : undefined;
+            if (tier) {
+              const shiftRule = tier.shiftRules.find((r) => r.shift === shift);
+              if (shiftRule?.eligible === false) return false;
+              if (isWeekend(startDate, d) && shiftRule?.weekendEligible === false) return false;
+            }
+            const maxNights = tier?.maxConsecutiveNights ?? rules.maxConsecutiveNights;
             if (
               shift === "NIGHT" &&
-              consecutiveNightsEndingBefore(grid[i], d) >= rules.maxConsecutiveNights
+              consecutiveNightsEndingBefore(grid[i], d) >= maxNights
             )
               return false;
             if (shift === "NIGHT" && nightsInWeek(grid[i], d) >= rules.maxNightsPerWeek)

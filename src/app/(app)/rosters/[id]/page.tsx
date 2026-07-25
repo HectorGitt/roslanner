@@ -25,6 +25,8 @@ interface RosterPayload {
   offDays: OffDay[];
   coverage: SolverInput["coverage"];
   rules: SolverInput["rules"];
+  tiers: SolverInput["tiers"];
+  tierPairings: SolverInput["tierPairings"];
   grid: Grid;
   evaluation: Evaluation;
 }
@@ -72,6 +74,8 @@ export default function RosterPage() {
       coverage: data.coverage,
       rules: data.rules,
       offDays: data.offDays,
+      tiers: data.tiers,
+      tierPairings: data.tierPairings,
     };
     return evaluate(input, grid);
   }, [data, grid]);

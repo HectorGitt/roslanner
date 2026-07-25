@@ -16,11 +16,31 @@ interface Role {
   id: string;
   name: string;
 }
+interface Tier {
+  id: string;
+  name: string;
+  rank: number;
+}
 interface StaffRow {
   id: string;
   name: string;
   active: boolean;
   role: Role;
+  tierId: string | null;
+  tier: Tier | null;
+}
+interface ShiftDef {
+  id: string;
+  code: string;
+  label: string;
+  isNightLike: boolean;
+  sortOrder: number;
+}
+interface EligibilityRow {
+  tierId: string;
+  shiftDefId: string;
+  eligible: boolean;
+  weekendEligible: boolean;
 }
 interface Requirement {
   shift: string;
@@ -40,6 +60,7 @@ interface Ward {
   staff: StaffRow[];
   requirements: Requirement[];
   rules: Rules | null;
+  shiftDefinitions: ShiftDef[];
 }
 
 const DEFAULT_RULES: Rules = {
@@ -50,23 +71,29 @@ const DEFAULT_RULES: Rules = {
   maxConsecutiveNights: 4,
 };
 
-type Tab = "staff" | "coverage" | "rules";
+type Tab = "staff" | "coverage" | "rules" | "tiers";
 
 export default function WardDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [ward, setWard] = useState<Ward | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [tiers, setTiers] = useState<Tier[]>([]);
+  const [eligibility, setEligibility] = useState<EligibilityRow[]>([]);
   const [tab, setTab] = useState<Tab>("staff");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
-    const [w, r] = await Promise.all([
+    const [w, r, t, e] = await Promise.all([
       api<Ward>(`/api/wards/${id}`),
       api<Role[]>("/api/roles"),
+      api<Tier[]>("/api/tiers"),
+      api<EligibilityRow[]>(`/api/tier-eligibility?wardId=${id}`),
     ]);
     setWard(w);
     setRoles(r);
+    setTiers(t);
+    setEligibility(e);
   }, [id]);
 
   useEffect(() => {
@@ -91,6 +118,7 @@ export default function WardDetailPage() {
             ["staff", `Staff (${ward.staff.length})`],
             ["coverage", "Coverage"],
             ["rules", "Rules"],
+            ["tiers", "Tier eligibility"],
           ] as [Tab, string][]
         ).map(([t, label]) => (
           <button
@@ -110,7 +138,19 @@ export default function WardDetailPage() {
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
       {tab === "staff" && (
-        <StaffTab ward={ward} roles={roles} onChanged={load} />
+        <StaffTab ward={ward} roles={roles} tiers={tiers} onChanged={load} />
+      )}
+      {tab === "tiers" && (
+        <TierEligibilityTab
+          ward={ward}
+          tiers={tiers}
+          eligibility={eligibility}
+          onSaved={() => {
+            setNotice("Tier eligibility saved.");
+            setTimeout(() => setNotice(""), 2500);
+            load();
+          }}
+        />
       )}
       {tab === "coverage" && (
         <CoverageTab
@@ -140,14 +180,17 @@ export default function WardDetailPage() {
 function StaffTab({
   ward,
   roles,
+  tiers,
   onChanged,
 }: {
   ward: Ward;
   roles: Role[];
+  tiers: Tier[];
   onChanged: () => void;
 }) {
   const [name, setName] = useState("");
   const [roleId, setRoleId] = useState("");
+  const [tierId, setTierId] = useState("");
   const [error, setError] = useState("");
 
   async function addStaff(e: FormEvent) {
@@ -156,13 +199,26 @@ function StaffTab({
     try {
       await api("/api/staff", {
         method: "POST",
-        body: JSON.stringify({ name, roleId: roleId || roles[0]?.id, wardId: ward.id }),
+        body: JSON.stringify({
+          name,
+          roleId: roleId || roles[0]?.id,
+          wardId: ward.id,
+          tierId: tierId || null,
+        }),
       });
       setName("");
       onChanged();
     } catch (err) {
       setError((err as Error).message);
     }
+  }
+
+  async function changeTier(staffId: string, newTierId: string) {
+    await api(`/api/staff/${staffId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ tierId: newTierId || null }),
+    });
+    onChanged();
   }
 
   async function removeStaff(id: string, staffName: string) {
@@ -208,6 +264,20 @@ function StaffTab({
             </option>
           ))}
         </select>
+        {tiers.length > 0 && (
+          <select
+            value={tierId}
+            onChange={(e) => setTierId(e.target.value)}
+            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm text-slate-900 dark:text-white shadow-sm"
+          >
+            <option value="">No tier</option>
+            {tiers.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        )}
         <button className="rounded-xl bg-teal-600 px-5 py-2 text-sm font-medium text-white hover:bg-teal-700 shadow-sm shadow-teal-600/20 transition-all">
           Add staff
         </button>
@@ -230,6 +300,20 @@ function StaffTab({
               <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400">
                 {s.role.name}
               </span>
+              {tiers.length > 0 && (
+                <select
+                  value={s.tierId ?? ""}
+                  onChange={(e) => changeTier(s.id, e.target.value)}
+                  className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400"
+                >
+                  <option value="">No tier</option>
+                  {tiers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="flex gap-4 text-xs font-medium">
               <button
@@ -419,6 +503,139 @@ function RulesTab({ ward, onSaved }: { ward: Ward; onSaved: () => void }) {
         className="rounded-xl bg-teal-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm shadow-teal-600/20 transition-all"
       >
         {saving ? "Saving…" : "Save rules"}
+      </button>
+    </div>
+  );
+}
+
+function TierEligibilityTab({
+  ward,
+  tiers,
+  eligibility,
+  onSaved,
+}: {
+  ward: Ward;
+  tiers: Tier[];
+  eligibility: EligibilityRow[];
+  onSaved: () => void;
+}) {
+  // Missing rows mean "eligible" — the engine only restricts when a row says otherwise.
+  const [rows, setRows] = useState<Record<string, { eligible: boolean; weekendEligible: boolean }>>(
+    () => {
+      const map: Record<string, { eligible: boolean; weekendEligible: boolean }> = {};
+      for (const e of eligibility) {
+        map[`${e.tierId}|${e.shiftDefId}`] = {
+          eligible: e.eligible,
+          weekendEligible: e.weekendEligible,
+        };
+      }
+      return map;
+    },
+  );
+  const [saving, setSaving] = useState(false);
+
+  const get = (tierId: string, shiftDefId: string) =>
+    rows[`${tierId}|${shiftDefId}`] ?? { eligible: true, weekendEligible: true };
+
+  const set = (
+    tierId: string,
+    shiftDefId: string,
+    patch: Partial<{ eligible: boolean; weekendEligible: boolean }>,
+  ) =>
+    setRows((r) => {
+      const key = `${tierId}|${shiftDefId}`;
+      return { ...r, [key]: { ...get(tierId, shiftDefId), ...patch } };
+    });
+
+  async function save() {
+    setSaving(true);
+    const items = tiers.flatMap((t) =>
+      ward.shiftDefinitions.map((sd) => ({
+        tierId: t.id,
+        shiftDefId: sd.id,
+        ...get(t.id, sd.id),
+      })),
+    );
+    await api("/api/tier-eligibility", {
+      method: "PUT",
+      body: JSON.stringify({ wardId: ward.id, items }),
+    });
+    setSaving(false);
+    onSaved();
+  }
+
+  if (tiers.length === 0) {
+    return (
+      <p className="text-sm text-slate-500 dark:text-slate-400">
+        Create staff tiers first on the{" "}
+        <Link href="/tiers" className="text-teal-700 dark:text-teal-400 underline">
+          Tiers
+        </Link>{" "}
+        page.
+      </p>
+    );
+  }
+
+  return (
+    <div className="max-w-3xl space-y-5">
+      <p className="text-sm text-slate-500 dark:text-slate-400">
+        Which shifts each tier can work in this ward. Uncheck a shift to make that tier
+        ineligible for it (e.g. senior staff on mornings only), or uncheck{" "}
+        <span className="font-medium">Weekends</span> to keep a tier off weekend duty.
+      </p>
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-left text-slate-700 dark:text-slate-300">
+              <th className="px-5 py-3 font-medium">Tier</th>
+              {ward.shiftDefinitions.map((sd) => (
+                <th key={sd.id} className="px-5 py-3 font-medium">
+                  {sd.label}
+                </th>
+              ))}
+              <th className="px-5 py-3 font-medium">Weekends</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tiers.map((t) => (
+              <tr
+                key={t.id}
+                className="border-b border-slate-100 dark:border-slate-800/50 last:border-0"
+              >
+                <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">{t.name}</td>
+                {ward.shiftDefinitions.map((sd) => (
+                  <td key={sd.id} className="px-5 py-3">
+                    <input
+                      type="checkbox"
+                      checked={get(t.id, sd.id).eligible}
+                      onChange={(e) => set(t.id, sd.id, { eligible: e.target.checked })}
+                      className="h-4 w-4 accent-teal-600"
+                    />
+                  </td>
+                ))}
+                <td className="px-5 py-3">
+                  <input
+                    type="checkbox"
+                    checked={ward.shiftDefinitions.every((sd) => get(t.id, sd.id).weekendEligible)}
+                    onChange={(e) =>
+                      ward.shiftDefinitions.forEach((sd) =>
+                        set(t.id, sd.id, { weekendEligible: e.target.checked }),
+                      )
+                    }
+                    className="h-4 w-4 accent-teal-600"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button
+        onClick={save}
+        disabled={saving}
+        className="rounded-xl bg-teal-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm shadow-teal-600/20 transition-all"
+      >
+        {saving ? "Saving…" : "Save tier eligibility"}
       </button>
     </div>
   );

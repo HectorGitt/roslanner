@@ -31,10 +31,19 @@ async function buildRosterPayload(id: string) {
   if (extraIds.length > 0) {
     const extras = await prisma.staff.findMany({
       where: { id: { in: extraIds } },
-      include: { role: true },
+      include: { role: true, tier: true },
     });
     for (const e of extras) {
-      input.staff.push({ id: e.id, name: e.name, roleId: e.roleId, roleName: e.role.name });
+      input.staff.push({
+        id: e.id,
+        name: e.name,
+        roleId: e.roleId,
+        roleName: e.role.name,
+        tierId: e.tierId ?? undefined,
+        tierName: e.tier?.name,
+        fte: e.fte,
+        canBeLead: e.canBeLead,
+      });
     }
   }
 
@@ -61,6 +70,8 @@ async function buildRosterPayload(id: string) {
     offDays: input.offDays,
     coverage: input.coverage,
     rules: input.rules,
+    tiers: input.tiers,
+    tierPairings: input.tierPairings,
     grid,
     evaluation,
   };
