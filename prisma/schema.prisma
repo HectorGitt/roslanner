@@ -1,0 +1,185 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// ===== Tenancy & auth =====
+
+model Hospital {
+  id         String   @id @default(cuid())
+  name       String
+  inviteCode String   @unique
+  users      User[]
+  wards      Ward[]
+  roles      Role[]
+  createdAt  DateTime @default(now())
+}
+
+// Better Auth managed models (user/session/account/verification)
+model User {
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now())
+  sessions      Session[]
+  accounts      Account[]
+  // App-specific tenancy fields
+  hospitalId    String?
+  hospital      Hospital? @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  role          String    @default("MEMBER") // ADMIN | MEMBER
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @default(now())
+
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @default(now())
+
+  @@map("verification")
+}
+
+// ===== Rostering =====
+
+model Ward {
+  id           String                @id @default(cuid())
+  name         String
+  hospitalId   String
+  hospital     Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  requirements CoverageRequirement[]
+  staff        Staff[]
+  rosters      Roster[]
+  rules        RuleSet?
+  createdAt    DateTime              @default(now())
+
+  @@unique([hospitalId, name])
+}
+
+model Role {
+  id           String                @id @default(cuid())
+  name         String
+  hospitalId   String
+  hospital     Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  staff        Staff[]
+  requirements CoverageRequirement[]
+
+  @@unique([hospitalId, name])
+}
+
+model Staff {
+  id            String         @id @default(cuid())
+  name          String
+  roleId        String
+  role          Role           @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  wardId        String
+  ward          Ward           @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  active        Boolean        @default(true)
+  leaveRequests LeaveRequest[]
+  assignments   Assignment[]
+  createdAt     DateTime       @default(now())
+}
+
+// Required headcount for a ward + shift + role.
+// shift: "MORNING" | "AFTERNOON" | "NIGHT"
+model CoverageRequirement {
+  id       String @id @default(cuid())
+  wardId   String
+  ward     Ward   @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  shift    String
+  roleId   String
+  role     Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  required Int
+
+  @@unique([wardId, shift, roleId])
+}
+
+// Per-ward scheduling rules.
+model RuleSet {
+  id                   String  @id @default(cuid())
+  wardId               String  @unique
+  ward                 Ward    @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  maxConsecutiveDays   Int     @default(6)
+  maxNightsPerWeek     Int     @default(3)
+  minDaysOffPerWeek    Int     @default(1)
+  noMorningAfterNight  Boolean @default(true)
+  maxConsecutiveNights Int     @default(4)
+}
+
+// type: "LEAVE" (hard — must be off) | "DAY_OFF_REQUEST" (soft preference)
+model LeaveRequest {
+  id        String   @id @default(cuid())
+  staffId   String
+  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  startDate DateTime
+  endDate   DateTime
+  type      String   @default("LEAVE")
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model Roster {
+  id          String       @id @default(cuid())
+  wardId      String
+  ward        Ward         @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  startDate   DateTime
+  days        Int
+  status      String       @default("DRAFT") // DRAFT | PUBLISHED
+  assignments Assignment[]
+  createdAt   DateTime     @default(now())
+}
+
+// shift: "MORNING" | "AFTERNOON" | "NIGHT" | "DO"
+model Assignment {
+  id       String @id @default(cuid())
+  rosterId String
+  roster   Roster @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  staffId  String
+  staff    Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  dayIndex Int
+  shift    String
+
+  @@unique([rosterId, staffId, dayIndex])
+}
