@@ -3,7 +3,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "@/lib/db";
 
 export const auth = betterAuth({
-  database: prismaAdapter(prisma, { provider: "sqlite" }),
+  database: prismaAdapter(prisma, { provider: "postgresql" }),
   // Local dev runs on varying ports/hosts — trust them all so the
   // origin check doesn't reject sign-in when the port differs from
   // BETTER_AUTH_URL. Add your production URL here when deploying.

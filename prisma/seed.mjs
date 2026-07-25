@@ -14,7 +14,7 @@ try {
 const prisma = new PrismaClient();
 
 const auth = betterAuth({
-  database: prismaAdapter(prisma, { provider: "sqlite" }),
+  database: prismaAdapter(prisma, { provider: "postgresql" }),
   emailAndPassword: { enabled: true, minPasswordLength: 8 },
 });
 

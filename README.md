@@ -9,13 +9,46 @@ cell with live violation checking.
 
 ```bash
 npm install
-npm run db:push    # create the SQLite database (prisma/dev.db)
+npm run db:push    # create the schema in your Postgres database
 npm run db:seed    # optional: demo hospital, wards, staff, coverage, leave
 npm run dev        # http://localhost:3000
 ```
 
-`.env` needs `BETTER_AUTH_SECRET` (any long random string) and
-`BETTER_AUTH_URL` (the app URL).
+`.env` needs:
+
+- `DATABASE_URL` — a Postgres connection string, e.g.
+  `postgresql://user:password@host:5432/roslanner?sslmode=require`
+- `BETTER_AUTH_SECRET` (any long random string)
+- `BETTER_AUTH_URL` (the app URL)
+
+### Database (GCP Cloud SQL)
+
+The app runs on Postgres and is deployed with a dedicated
+[Cloud SQL](https://cloud.google.com/sql) instance so it works from
+serverless hosts (Netlify, Vercel, …) whose functions have no persistent
+local disk — a file-based SQLite DB doesn't survive between invocations
+there.
+
+To provision one yourself:
+
+```bash
+gcloud sql instances create <name> \
+  --edition=enterprise \
+  --database-version=POSTGRES_16 \
+  --tier=db-f1-micro \
+  --region=us-central1 \
+  --root-password=<strong-password>
+
+gcloud sql databases create roslanner --instance=<name>
+gcloud sql users create roslanner_app --instance=<name> --password=<strong-password>
+gcloud sql instances patch <name> --ssl-mode=ENCRYPTED_ONLY --authorized-networks=0.0.0.0/0
+```
+
+The last step opens the instance to the public internet over TLS — needed
+because serverless hosts don't have static outbound IPs to allowlist
+instead. Rely on a strong password and `sslmode=require` in the connection
+string. If your host does have static egress IPs, replace `0.0.0.0/0` with
+those for tighter access control.
 
 Demo login after seeding: **admin@demo.hospital / password123**
 (hospital invite code: `DEMO-2026`).
@@ -60,7 +93,7 @@ exactly which shifts can't be covered.
 
 ### Stack
 
-Next.js 16 (App Router) · TypeScript · Tailwind 4 · Prisma 6 + SQLite
+Next.js 16 (App Router) · TypeScript · Tailwind 4 · Prisma 6 + PostgreSQL (GCP Cloud SQL)
 
 ## Data model
 
