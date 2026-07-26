@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseISODate } from "@/lib/dates";
 import { prisma } from "@/lib/db";
+import { saveChargeLeads } from "@/lib/roster/charge-leads";
 import { syncRosterCommitments } from "@/lib/roster/commitments";
 import { loadSolverInput } from "@/lib/roster/load";
 import { solve } from "@/lib/roster/solve";
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  await saveChargeLeads(roster.id, result.chargeLeads);
   const { skipped } = await syncRosterCommitments(roster.id);
 
   return NextResponse.json(

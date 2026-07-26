@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import {
   CoverageReq,
   HolidayRule,
+  RuleType,
+  WardRule,
   ExternalShift,
   OffDay,
   PriorStats,
@@ -34,7 +36,7 @@ export async function loadSolverInput(
     select: { hospitalId: true },
   });
 
-  const [staff, requirements, ruleSet, shiftDefsRaw, tiersRaw, pairingsRaw] =
+  const [staff, requirements, ruleSet, shiftDefsRaw, tiersRaw, pairingsRaw, wardRulesRaw] =
     await Promise.all([
       // Staff based here, plus anyone from the float pool eligible for this ward.
       prisma.staff.findMany({
@@ -58,6 +60,7 @@ export async function loadSolverInput(
       prisma.tierPairingRule.findMany({
         where: { dependentTier: { hospitalId: ward.hospitalId } },
       }),
+      prisma.wardRule.findMany({ where: { wardId, enabled: true } }),
     ]);
 
   const shiftDefs: ShiftDef[] = shiftDefsRaw.map((sd) => ({
@@ -181,6 +184,13 @@ export async function loadSolverInput(
 
   const rules = ruleSet ?? DEFAULT_RULES;
 
+  const wardRules: WardRule[] = wardRulesRaw.map((r) => ({
+    type: r.type as RuleType,
+    params: (r.params ?? {}) as WardRule["params"],
+    tierId: r.tierId ?? undefined,
+    shiftCode: r.shiftCode ?? undefined,
+  }));
+
   // Public holidays falling inside this period.
   const holidays = await prisma.publicHoliday.findMany({
     where: {
@@ -224,6 +234,9 @@ export async function loadSolverInput(
     floatStaffIds: staff.filter((s) => s.wardId !== wardId).map((s) => s.id),
     publicHolidayDayIndexes,
     priorStats,
+    wardRules,
+    // Filled by the caller for an existing roster; a fresh solve starts with none.
+    chargeLeads: [],
   };
 }
 

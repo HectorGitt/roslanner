@@ -21,6 +21,7 @@ interface StaffRow {
   role: Role;
   tierId: string | null;
   tier: Tier | null;
+  canBeLead: boolean;
   floatWards: { wardId: string; ward: { id: string; name: string } }[];
 }
 /** Someone based in another ward who can also be rostered here. */
@@ -44,6 +45,15 @@ interface Requirement {
   required: number;
   daysOfWeek: number[];
   holidayRule: string;
+}
+interface WardRuleRow {
+  id: string;
+  type: string;
+  params: Record<string, number>;
+  tierId: string | null;
+  tier: { id: string; name: string } | null;
+  shiftCode: string | null;
+  enabled: boolean;
 }
 interface Rules {
   maxConsecutiveDays: number;
@@ -179,6 +189,7 @@ export default function WardDetailPage() {
       {tab === "rules" && (
         <RulesTab
           ward={ward}
+          tiers={tiers}
           onSaved={() => {
             setNotice("Rules saved.");
             setTimeout(() => setNotice(""), 2500);
@@ -232,6 +243,14 @@ function StaffTab({
     await api(`/api/staff/${staffId}`, {
       method: "PATCH",
       body: JSON.stringify({ tierId: newTierId || null }),
+    });
+    onChanged();
+  }
+
+  async function toggleLead(s: StaffRow) {
+    await api("/api/staff/" + s.id, {
+      method: "PATCH",
+      body: JSON.stringify({ canBeLead: !s.canBeLead }),
     });
     onChanged();
   }
@@ -340,6 +359,17 @@ function StaffTab({
                 )}
               </div>
               <div className="flex gap-4 text-xs font-medium">
+                <button
+                  onClick={() => toggleLead(s)}
+                  title="Whether this person can be put in charge of a shift"
+                  className={
+                    s.canBeLead
+                      ? "text-teal-700 dark:text-teal-400"
+                      : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                  }
+                >
+                  {s.canBeLead ? "Can lead ✓" : "Can lead"}
+                </button>
                 <button
                   onClick={() => toggleActive(s)}
                   className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
@@ -672,7 +702,15 @@ function CoverageTab({
   );
 }
 
-function RulesTab({ ward, onSaved }: { ward: Ward; onSaved: () => void }) {
+function RulesTab({
+  ward,
+  tiers,
+  onSaved,
+}: {
+  ward: Ward;
+  tiers: Tier[];
+  onSaved: () => void;
+}) {
   const [rules, setRules] = useState<Rules>(ward.rules ?? DEFAULT_RULES);
   const [saving, setSaving] = useState(false);
 
@@ -708,7 +746,8 @@ function RulesTab({ ward, onSaved }: { ward: Ward; onSaved: () => void }) {
   );
 
   return (
-    <div className="max-w-xl space-y-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+    <div className="space-y-8">
+      <div className="max-w-xl space-y-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
       {numField(
         "Max consecutive working days",
         "maxConsecutiveDays",
@@ -786,9 +825,224 @@ function RulesTab({ ward, onSaved }: { ward: Ward; onSaved: () => void }) {
       >
         {saving ? "Saving…" : "Save rules"}
       </button>
+      </div>
+      <ExtraRulesPanel ward={ward} tiers={tiers} />
     </div>
   );
 }
+
+/** Human wording for each rule type, and which parameter it takes. */
+const RULE_INFO: Record<
+  string,
+  {
+    label: string;
+    describe: (p: Record<string, number>) => string;
+    param?: { key: string; label: string; default: number };
+  }
+> = {
+  BLOCK_PATTERN_ON_OFF: {
+    label: "A block of nights earns the same time off",
+    describe: (p) =>
+      (p.blockDays ?? 7) + " or more nights in a row must be followed by as many days off",
+    param: { key: "blockDays", label: "nights in a row", default: 7 },
+  },
+  CHARGE_LEAD_REQUIRED: {
+    label: "Every shift needs someone in charge",
+    describe: () => "One lead per worked shift, from staff marked as able to lead",
+  },
+  MAX_HOURS_PER_WEEK: {
+    label: "Maximum hours in any 7 days",
+    describe: (p) => "No more than " + (p.hours ?? 48) + "h in any rolling 7-day window",
+    param: { key: "hours", label: "hours", default: 48 },
+  },
+};
+
+/**
+ * Rules that carry their own setting, kept apart from the plain numeric limits
+ * because they may also apply to just one tier or one shift.
+ */
+function ExtraRulesPanel({ ward, tiers }: { ward: Ward; tiers: Tier[] }) {
+  const [rules, setRules] = useState<WardRuleRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [type, setType] = useState("BLOCK_PATTERN_ON_OFF");
+  const [paramValue, setParamValue] = useState(7);
+  const [tierId, setTierId] = useState("");
+  const [shiftCode, setShiftCode] = useState("");
+
+  const load = useCallback(
+    () =>
+      api<{ items: WardRuleRow[] }>("/api/ward-rules?wardId=" + ward.id)
+        .then((r) => setRules(r.items))
+        .finally(() => setLoading(false)),
+    [ward.id],
+  );
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const info = RULE_INFO[type];
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    try {
+      await api("/api/ward-rules", {
+        method: "POST",
+        body: JSON.stringify({
+          wardId: ward.id,
+          type,
+          params: info.param ? { [info.param.key]: paramValue } : {},
+          tierId: tierId || null,
+          shiftCode: shiftCode || null,
+        }),
+      });
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function toggle(r: WardRuleRow) {
+    await api("/api/ward-rules/" + r.id, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: !r.enabled }),
+    });
+    load();
+  }
+
+  async function remove(id: string) {
+    await api("/api/ward-rules/" + id, { method: "DELETE" });
+    load();
+  }
+
+  return (
+    <div className="max-w-xl space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Additional rules</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Rules that need their own setting, and can apply to one tier or one shift
+          rather than the whole ward.
+        </p>
+      </div>
+
+      <form
+        onSubmit={add}
+        className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm"
+      >
+        <select
+          value={type}
+          onChange={(e) => {
+            setType(e.target.value);
+            setParamValue(RULE_INFO[e.target.value].param?.default ?? 0);
+          }}
+          className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
+        >
+          {Object.entries(RULE_INFO).map(([key, v]) => (
+            <option key={key} value={key}>
+              {v.label}
+            </option>
+          ))}
+        </select>
+        <div className="flex flex-wrap items-end gap-3 text-sm">
+          {info.param && (
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">
+                {info.param.label}
+              </span>
+              <input
+                type="number"
+                min={1}
+                value={paramValue}
+                onChange={(e) => setParamValue(Number(e.target.value))}
+                className="w-24 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
+              />
+            </label>
+          )}
+          <label className="block">
+            <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">applies to</span>
+            <select
+              value={tierId}
+              onChange={(e) => setTierId(e.target.value)}
+              className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
+            >
+              <option value="">every tier</option>
+              {tiers.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">on</span>
+            <select
+              value={shiftCode}
+              onChange={(e) => setShiftCode(e.target.value)}
+              className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
+            >
+              <option value="">every shift</option>
+              {ward.shiftDefinitions.map((sd) => (
+                <option key={sd.id} value={sd.code}>
+                  {sd.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">
+            Add rule
+          </button>
+        </div>
+      </form>
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+      <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        {loading && (
+          <p className="px-5 py-6 text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+        )}
+        {!loading && rules.length === 0 && (
+          <p className="px-5 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+            No additional rules on this ward.
+          </p>
+        )}
+        {rules.map((r) => (
+          <div
+            key={r.id}
+            className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800/50 px-5 py-3 last:border-0"
+          >
+            <div className={r.enabled ? "" : "opacity-50"}>
+              <p className="text-sm font-medium text-slate-900 dark:text-white">
+                {RULE_INFO[r.type]?.label ?? r.type}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {RULE_INFO[r.type]?.describe(r.params ?? {}) ?? ""}
+                {r.tier ? " · " + r.tier.name + " only" : ""}
+                {r.shiftCode ? " · " + r.shiftCode + " only" : ""}
+                {r.enabled ? "" : " · off"}
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-3 text-xs">
+              <button
+                onClick={() => toggle(r)}
+                className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+              >
+                {r.enabled ? "Disable" : "Enable"}
+              </button>
+              <button
+                onClick={() => remove(r.id)}
+                className="text-slate-400 hover:text-red-600 dark:hover:text-red-400"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 /** Minutes-from-midnight <-> "HH:MM" for the time inputs. */
 function toTimeValue(minutes: number): string {

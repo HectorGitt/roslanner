@@ -81,6 +81,8 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     externalShifts,
     publicHolidayDayIndexes,
     priorStats,
+    wardRules,
+    chargeLeads,
   } = input;
   const isHoliday = new Set(publicHolidayDayIndexes);
   const priorByStaff = new Map(priorStats.map((p) => [p.staffId, p]));
@@ -340,6 +342,117 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     }
   }
 
+  // --- Parameterised ward rules -------------------------------------------
+  // One branch per rule type: the meaning of a rule lives here, only its
+  // thresholds and scope come from the database.
+  for (const rule of wardRules) {
+    switch (rule.type) {
+      case "BLOCK_PATTERN_ON_OFF": {
+        // A stretch of nights must be followed by at least as long off, which is
+        // a shape over the whole period rather than a per-day or weekly tally.
+        const blockDays = num(rule.params.blockDays, 7);
+        if (blockDays < 1) break;
+        for (let s = 0; s < staff.length; s++) {
+          if (rule.tierId && staff[s].tierId !== rule.tierId) continue;
+          const row = grid[s];
+          let runStart = -1;
+          for (let d = 0; d <= days; d++) {
+            const night = d < days && isNight(row[d]);
+            if (night && runStart < 0) runStart = d;
+            if (!night && runStart >= 0) {
+              const runLength = d - runStart;
+              if (runLength >= blockDays) {
+                // Every day in the following block must be off, as far as this
+                // roster reaches — a run finishing at the very end constrains
+                // the next period, which is that roster's problem.
+                const offEnd = Math.min(d + runLength, days);
+                const worked = [];
+                for (let k = d; k < offEnd; k++) if (isWorkShift(row[k])) worked.push(k);
+                if (worked.length > 0) {
+                  violations.push({
+                    type: "BLOCK_PATTERN_BROKEN",
+                    severity: "HARD",
+                    message: `${staff[s].name}: ${runLength} nights in a row must be followed by ${runLength} days off, but works day ${worked[0] + 1}`,
+                    staffId: staff[s].id,
+                    dayIndexes: [runStart, ...worked],
+                  });
+                }
+              }
+              runStart = -1;
+            }
+          }
+        }
+        break;
+      }
+
+      case "MAX_HOURS_PER_WEEK": {
+        const maxHours = num(rule.params.hours, 48);
+        for (let s = 0; s < staff.length; s++) {
+          if (rule.tierId && staff[s].tierId !== rule.tierId) continue;
+          // Rolling, not calendar: any seven consecutive days.
+          for (let start = 0; start + 7 <= days; start++) {
+            let hours = 0;
+            for (let d = start; d < start + 7; d++) {
+              const def = defByCode.get(grid[s][d]);
+              if (def) hours += shiftHours(def);
+            }
+            if (hours > maxHours) {
+              violations.push({
+                type: "MAX_HOURS_PER_WEEK",
+                severity: "HARD",
+                message: `${staff[s].name}: ${hours}h in the 7 days from day ${start + 1} (max ${maxHours}h)`,
+                staffId: staff[s].id,
+                dayIndexes: range(start, start + 7),
+              });
+              break; // one report per person is enough to act on
+            }
+          }
+        }
+        break;
+      }
+
+      case "CHARGE_LEAD_REQUIRED": {
+        const leadKey = new Set(
+          chargeLeads.map((l) => `${l.dayIndex}|${l.shiftCode}`),
+        );
+        const leadBy = new Map(
+          chargeLeads.map((l) => [`${l.dayIndex}|${l.shiftCode}`, l.staffId]),
+        );
+        const canLead = new Map(staff.map((s) => [s.id, s.canBeLead]));
+        for (let d = 0; d < days; d++) {
+          for (const sd of shiftDefs) {
+            if (rule.shiftCode && rule.shiftCode !== sd.code) continue;
+            // Only shifts somebody actually works need a lead.
+            const onShift = staff.filter((_, i) => grid[i][d] === sd.code);
+            if (onShift.length === 0) continue;
+            const key = `${d}|${sd.code}`;
+            if (!leadKey.has(key)) {
+              violations.push({
+                type: "CHARGE_LEAD_MISSING",
+                severity: "HARD",
+                message: `Day ${d + 1}: ${sd.label} has nobody in charge`,
+                dayIndexes: [d],
+              });
+              continue;
+            }
+            const leadId = leadBy.get(key)!;
+            const stillOn = onShift.some((s) => s.id === leadId);
+            if (!stillOn || !canLead.get(leadId)) {
+              violations.push({
+                type: "CHARGE_LEAD_NOT_ELIGIBLE",
+                severity: "HARD",
+                message: `Day ${d + 1}: ${sd.label} is led by someone ${stillOn ? "not marked as able to lead" : "no longer on that shift"}`,
+                staffId: leadId,
+                dayIndexes: [d],
+              });
+            }
+          }
+        }
+        break;
+      }
+    }
+  }
+
   // --- Fairness: spread of nights / weekend shifts / totals within each role ---
   let fairnessCost = 0;
   const byRole = new Map<string, number[]>();
@@ -517,6 +630,18 @@ function scopeLabel(input: SolverInput, req: { roleId?: string; tierId?: string 
 
 function tierName(input: SolverInput, tierId: string): string {
   return input.tiers.find((t) => t.id === tierId)?.name ?? "tier";
+}
+
+/** Read a numeric rule parameter, falling back when it's absent or malformed. */
+function num(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** Length of a shift in hours, accounting for one that runs past midnight. */
+export function shiftHours(def: { startMinutes: number; endMinutes: number; crossesMidnight: boolean }): number {
+  const end = def.crossesMidnight ? def.endMinutes + 24 * 60 : def.endMinutes;
+  return (end - def.startMinutes) / 60;
 }
 
 /** Sum of absolute deviations from the mean — cheap fairness measure. */

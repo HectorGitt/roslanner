@@ -40,6 +40,8 @@ interface RosterPayload {
   floatStaffIds: string[];
   publicHolidayDayIndexes: number[];
   priorStats: SolverInput["priorStats"];
+  wardRules: SolverInput["wardRules"];
+  chargeLeads: SolverInput["chargeLeads"];
   grid: Grid;
   evaluation: Evaluation;
 }
@@ -79,6 +81,8 @@ export default function RosterPage() {
       floatStaffIds: data.floatStaffIds,
       publicHolidayDayIndexes: data.publicHolidayDayIndexes,
       priorStats: data.priorStats,
+      wardRules: data.wardRules,
+      chargeLeads: data.chargeLeads,
     };
     return evaluate(input, grid);
   }, [data, grid]);
@@ -114,6 +118,12 @@ export default function RosterPage() {
     }
     return set;
   }, [evaluation]);
+
+  // Who is in charge of each shift, keyed by the cell they occupy.
+  const leadCells = useMemo(
+    () => new Set((data?.chargeLeads ?? []).map((l) => `${l.staffId}|${l.dayIndex}`)),
+    [data?.chargeLeads],
+  );
 
   const offMap = useMemo(() => {
     const m = new Map<string, "hard" | "soft">();
@@ -348,6 +358,12 @@ export default function RosterPage() {
           <b className="text-rose-600 dark:text-rose-400">L</b> leave &nbsp;
           <b className="text-sky-600 dark:text-sky-400">R</b> day-off request
         </span>
+        {data.chargeLeads.length > 0 && (
+          <span className="flex items-center gap-1.5">
+            <i className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+            in charge of the shift
+          </span>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
@@ -401,6 +417,7 @@ export default function RosterPage() {
                 shiftStyles={shiftStyles}
                 tally={shiftTally}
                 floatStaffIds={new Set(data.floatStaffIds)}
+                leadCells={leadCells}
               />
             ))}
           </tbody>
@@ -478,6 +495,7 @@ function GroupRows({
   shiftStyles,
   tally,
   floatStaffIds,
+  leadCells,
 }: {
   group: { roleName: string; rows: { staff: SolverStaff; idx: number }[] };
   days: number;
@@ -489,6 +507,7 @@ function GroupRows({
   shiftStyles: Map<string, ShiftStyle>;
   tally: (row: CellValue[]) => number[];
   floatStaffIds: Set<string>;
+  leadCells: Set<string>;
 }) {
   // A cell can hold a shift removed from the ward since the roster was made.
   const styleFor = (v: CellValue): ShiftStyle =>
@@ -545,6 +564,12 @@ function GroupRows({
                     }`}
                   >
                     {style.short}
+                    {leadCells.has(`${staff.id}|${d}`) && (
+                      <span
+                        title="In charge of this shift"
+                        className="absolute -bottom-0.5 -left-0.5 h-2 w-2 rounded-full bg-amber-500 ring-1 ring-white dark:ring-slate-900"
+                      />
+                    )}
                     {off && (
                       <span
                         className={`absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] font-bold text-white ${

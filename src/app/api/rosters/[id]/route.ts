@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { loadChargeLeads, saveChargeLeads } from "@/lib/roster/charge-leads";
 import { syncRosterCommitments } from "@/lib/roster/commitments";
 import { evaluate } from "@/lib/roster/engine";
 import { loadSolverInput, toISODate } from "@/lib/roster/load";
@@ -59,6 +60,8 @@ async function buildRosterPayload(id: string) {
     }
   }
 
+  // Leads are stored per roster, so evaluate against what's actually recorded.
+  input.chargeLeads = await loadChargeLeads(id);
   const evaluation = evaluate(input, grid);
 
   return {
@@ -79,6 +82,8 @@ async function buildRosterPayload(id: string) {
     floatStaffIds: input.floatStaffIds,
     publicHolidayDayIndexes: input.publicHolidayDayIndexes,
     priorStats: input.priorStats,
+    wardRules: input.wardRules,
+    chargeLeads: input.chargeLeads,
     grid,
     evaluation,
   };
@@ -143,6 +148,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         }))
       ),
     });
+    await saveChargeLeads(id, result.chargeLeads);
     assignmentsChanged = true;
   }
   if (body.status === "PUBLISHED" || body.status === "DRAFT") {

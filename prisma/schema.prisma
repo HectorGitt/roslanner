@@ -119,6 +119,7 @@ model Ward {
   /// Staff based elsewhere who may also be rostered here (float pool).
   floatStaff       StaffWardEligibility[]
   commitments      StaffDailyCommitment[]
+  wardRules        WardRule[]
   createdAt        DateTime              @default(now())
 
   @@unique([hospitalId, name])
@@ -190,6 +191,7 @@ model StaffTier {
   maxConsecutiveNights         Int?
   staff                        Staff[]
   requirements                 CoverageRequirement[]
+  wardRules                    WardRule[]
   shiftEligibility             TierShiftEligibility[]
   requiredPairingsAsDependent  TierPairingRule[] @relation("Dependent")
   requiredPairingsAsRequired   TierPairingRule[] @relation("Required")
@@ -315,6 +317,39 @@ model RuleSet {
   fairnessWindowDays   Int    @default(0)
 }
 
+/// Rules whose shape doesn't fit a fixed column: they may be scoped to a tier or
+/// a shift, and each type carries its own parameters.
+///
+/// `type` is a small vocabulary the engine knows how to interpret — the meaning
+/// of a rule lives in code, only its thresholds and scope are data. A new kind of
+/// rule is a new enum value plus a branch in evaluate(), not a schema change per
+/// hospital.
+model WardRule {
+  id        String   @id @default(cuid())
+  wardId    String
+  ward      Ward     @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  type      RuleType
+  /// Thresholds for this type, e.g. { "blockDays": 7 } or { "hours": 48 }.
+  params    Json     @default("{}")
+  /// Optional scope: null means every tier / every shift.
+  tierId    String?
+  tier      StaffTier? @relation(fields: [tierId], references: [id], onDelete: Cascade)
+  shiftCode String?
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+enum RuleType {
+  /// A run of night shifts must be followed by the same length of time off.
+  /// params: { blockDays } — the length of a "week" of nights for this ward.
+  BLOCK_PATTERN_ON_OFF
+  /// Every shift needs exactly one designated lead, drawn from staff marked as
+  /// able to lead. params: {}
+  CHARGE_LEAD_REQUIRED
+  /// Cap on hours worked in any rolling 7 days. params: { hours }
+  MAX_HOURS_PER_WEEK
+}
+
 // type: "LEAVE" (hard — must be off) | "DAY_OFF_REQUEST" (soft preference)
 model LeaveRequest {
   id        String   @id @default(cuid())
@@ -336,7 +371,23 @@ model Roster {
   status      String                 @default("DRAFT") // DRAFT | PUBLISHED
   assignments Assignment[]
   commitments StaffDailyCommitment[]
+  chargeLeads ChargeLeadAssignment[]
   createdAt   DateTime               @default(now())
+}
+
+/// The one person in charge of a given shift. A side table rather than a flag on
+/// Assignment because "exactly one per shift" is then a plain unique key, which
+/// Prisma can express and the database can enforce.
+model ChargeLeadAssignment {
+  id           String     @id @default(cuid())
+  assignmentId String     @unique
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  rosterId     String
+  roster       Roster     @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  dayIndex     Int
+  shiftCode    String
+
+  @@unique([rosterId, dayIndex, shiftCode])
 }
 
 /// `shift` holds the ward's ShiftDefinition.code, or "DO" for a day off.
@@ -351,6 +402,7 @@ model Assignment {
   dayIndex   Int
   shift      String
   commitment StaffDailyCommitment?
+  chargeLead ChargeLeadAssignment?
 
   @@unique([rosterId, staffId, dayIndex])
 }

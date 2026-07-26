@@ -80,6 +80,15 @@ Nothing about the shift model is hardcoded — each hospital configures its own.
   and pairing rules (an intern is never rostered without a senior present).
 - **Coverage** (per ward): minimum staff per shift, scoped by role, by tier, or
   both — so "2 nurses" and "at least one senior, any role" are enforced together.
+  A requirement can also be limited to certain days of the week, and told whether
+  it applies on public holidays — which is what lets a clinic close at weekends or
+  a ward run skeleton holiday cover.
+- **Additional rules** (per ward): rules that carry their own setting and may
+  apply to one tier or one shift — a block of nights earning the same time off, a
+  cap on hours in any rolling seven days, and requiring someone in charge of each
+  shift. The set of rule types lives in code (`evaluate()` has a branch per type);
+  only their thresholds and scope are data, so a hospital configures rather than
+  a developer redeploys.
 - **Rules** (per ward): max consecutive working days, max nights per week, max
   consecutive nights, min days off per week, and minimum rest hours between
   shifts — computed from the shifts' actual times, so it catches any too-quick

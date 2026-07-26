@@ -7,6 +7,7 @@ import {
 } from "./engine";
 import {
   CellValue,
+  ChargeLead,
   DAY_OFF,
   Grid,
   Shift,
@@ -84,12 +85,51 @@ export function solve(input: SolverInput): SolveResult {
     }
   }
 
+  // Leads are chosen after the search rather than being another dimension it
+  // has to explore: who is in charge doesn't change whether the grid is legal,
+  // so folding it into the move set would only slow the search down.
+  const chargeLeads = assignChargeLeads(input, grid);
+  const evaluation = chargeLeads.length > 0 ? evaluate({ ...input, chargeLeads }, grid) : best;
+
   return {
     grid,
-    evaluation: best,
+    chargeLeads,
+    evaluation,
     iterations,
     elapsedMs: Date.now() - started,
   };
+}
+
+/**
+ * Pick who is in charge of each worked shift, when the ward asks for a lead.
+ * Spreads the turns: for each shift the eligible person with the fewest so far.
+ */
+export function assignChargeLeads(input: SolverInput, grid: Grid): ChargeLead[] {
+  const needsLead = input.wardRules.filter((r) => r.type === "CHARGE_LEAD_REQUIRED");
+  if (needsLead.length === 0) return [];
+  const scoped = new Set(
+    needsLead.filter((r) => r.shiftCode).map((r) => r.shiftCode as string),
+  );
+  const everyShift = needsLead.some((r) => !r.shiftCode);
+
+  const leads: ChargeLead[] = [];
+  const turnsTaken = new Map<string, number>();
+  for (let d = 0; d < input.days; d++) {
+    for (const sd of input.shiftDefs) {
+      if (!everyShift && !scoped.has(sd.code)) continue;
+      const eligible = input.staff
+        .map((s, i) => ({ s, i }))
+        .filter(({ s, i }) => grid[i][d] === sd.code && s.canBeLead);
+      if (eligible.length === 0) continue; // reported as CHARGE_LEAD_MISSING
+      eligible.sort(
+        (a, b) => (turnsTaken.get(a.s.id) ?? 0) - (turnsTaken.get(b.s.id) ?? 0),
+      );
+      const chosen = eligible[0].s;
+      turnsTaken.set(chosen.id, (turnsTaken.get(chosen.id) ?? 0) + 1);
+      leads.push({ staffId: chosen.id, dayIndex: d, shiftCode: sd.code });
+    }
+  }
+  return leads;
 }
 
 function buildRoleMates(input: SolverInput): number[][] {

@@ -93,6 +93,30 @@ export interface Rules {
 }
 
 /**
+ * Rules whose shape doesn't fit a fixed column. The `type` is interpreted by
+ * evaluate(); `params` only carries that type's thresholds. Optionally scoped to
+ * one tier and/or one shift.
+ */
+export type RuleType =
+  | "BLOCK_PATTERN_ON_OFF"
+  | "CHARGE_LEAD_REQUIRED"
+  | "MAX_HOURS_PER_WEEK";
+
+export interface WardRule {
+  type: RuleType;
+  params: Record<string, number | string | boolean>;
+  tierId?: string;
+  shiftCode?: Shift;
+}
+
+/** Who is in charge of a shift: grid position -> designated lead. */
+export interface ChargeLead {
+  staffId: string;
+  dayIndex: number;
+  shiftCode: Shift;
+}
+
+/**
  * What each person already worked in the rolling window before this roster,
  * counted from published rosters across every ward. Pre-aggregated in the
  * loading layer so evaluate() stays pure arithmetic over plain numbers.
@@ -154,6 +178,10 @@ export interface SolverInput {
   publicHolidayDayIndexes: number[];
   /** Rolling-window history; empty when fairnessWindowDays is 0. */
   priorStats: PriorStats[];
+  /** Rules that carry their own parameters and scope. */
+  wardRules: WardRule[];
+  /** Who leads each shift, when the ward requires a designated lead. */
+  chargeLeads: ChargeLead[];
 }
 
 /** grid[staffIndex][dayIndex] — staff order matches input.staff. */
@@ -171,7 +199,11 @@ export type ViolationType =
   | "UNFAIR_SHARE"
   | "TIER_SHIFT_INELIGIBLE"
   | "TIER_PAIRING_UNMET"
-  | "COMMITTED_ELSEWHERE";
+  | "COMMITTED_ELSEWHERE"
+  | "BLOCK_PATTERN_BROKEN"
+  | "MAX_HOURS_PER_WEEK"
+  | "CHARGE_LEAD_MISSING"
+  | "CHARGE_LEAD_NOT_ELIGIBLE";
 
 export interface Violation {
   type: ViolationType;
@@ -194,6 +226,8 @@ export interface Evaluation {
 
 export interface SolveResult {
   grid: Grid;
+  /** Who leads each shift, when the ward requires it. */
+  chargeLeads: ChargeLead[];
   evaluation: Evaluation;
   iterations: number;
   elapsedMs: number;
