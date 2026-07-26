@@ -102,7 +102,11 @@ function greedyConstruct(input: SolverInput): Grid {
   const holidayDays = new Set(input.publicHolidayDayIndexes);
   // Spread scarce days (nights, weekends, holidays) using what people already
   // worked in the rolling window, so a fresh roster doesn't undo past balancing.
+  // Scaled to this roster's length — see the same note in engine.ts: raw window
+  // counts drown out the current period and pile work onto staff with no history.
   const priorByStaff = new Map(input.priorStats.map((p) => [p.staffId, p]));
+  const priorScale =
+    rules.fairnessWindowDays > 0 ? days / rules.fairnessWindowDays : 0;
 
   const hardOff = new Set<string>();
   const softOff = new Set<string>();
@@ -201,14 +205,15 @@ function greedyConstruct(input: SolverInput): Grid {
     const prior = priorByStaff.get(staff[i].id);
     // Per-FTE load, so part-timers aren't asked for a full-timer's share.
     const fte = Math.max(staff[i].fte, 0.01);
-    let s = ((totalShifts[i] + (prior?.total ?? 0)) / fte) * 2;
+    const was = (n: number | undefined) => (n ?? 0) * priorScale;
+    let s = ((totalShifts[i] + was(prior?.total)) / fte) * 2;
     if (shiftDef.isNightLike) {
-      s += ((totalNights[i] + (prior?.nights ?? 0)) / fte) * 3;
+      s += ((totalNights[i] + was(prior?.nights)) / fte) * 3;
       // Prefer continuing an existing night run (keeps rest patterns sane)
       if (d > 0 && defByCode.get(grid[i][d - 1])?.isNightLike) s -= 4;
     }
-    if (isWeekend(startDate, d)) s += ((prior?.weekends ?? 0) / fte) * 2;
-    if (holidayDays.has(d)) s += ((prior?.holidays ?? 0) / fte) * 4;
+    if (isWeekend(startDate, d)) s += (was(prior?.weekends) / fte) * 2;
+    if (holidayDays.has(d)) s += (was(prior?.holidays) / fte) * 4;
     if (softOff.has(`${staff[i].id}|${d}`)) s += 25; // avoid requested days off
     return s + Math.random(); // tie-break randomly
   }

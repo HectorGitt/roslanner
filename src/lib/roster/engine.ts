@@ -7,6 +7,7 @@ import {
   OffDay,
   PriorStats,
   Shift,
+  ViolationType,
   SolverInput,
   Violation,
 } from "./types";
@@ -14,6 +15,22 @@ import {
 const HARD_WEIGHT = 10_000;
 const SOFT_WEIGHT = 50;
 const FAIRNESS_WEIGHT = 1;
+
+/**
+ * Not all hard violations are equally bad, and with a flat weight the solver
+ * will happily trade one for another. A coverage shortfall is a visible gap a
+ * planner can fill by calling someone in; rostering a person on approved leave,
+ * onto a shift their tier bars them from, or into two wards at once breaches
+ * their entitlements and should never be preferred to a gap. Everything not
+ * listed weighs 1.
+ */
+const VIOLATION_WEIGHT: Partial<Record<ViolationType, number>> = {
+  HARD_LEAVE_BROKEN: 3,
+  COMMITTED_ELSEWHERE: 3,
+  TIER_SHIFT_INELIGIBLE: 3,
+  TIER_PAIRING_UNMET: 2,
+  INSUFFICIENT_REST: 2,
+};
 
 export function isWorkShift(v: CellValue): v is Shift {
   return v !== DAY_OFF;
@@ -66,6 +83,15 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
   } = input;
   const isHoliday = new Set(publicHolidayDayIndexes);
   const priorByStaff = new Map(priorStats.map((p) => [p.staffId, p]));
+  /**
+   * History is counted over a window that is usually much longer than the
+   * roster, so it has to be scaled to this roster's length before being added
+   * to in-period counts. Added raw, a 30-day history (up to ~20 shifts) swamps a
+   * 7-day roster (0–7) and anyone new — with no history at all — gets loaded to
+   * their limit on the first days, leaving the last day of the period unstaffed.
+   */
+  const priorScale =
+    rules.fairnessWindowDays > 0 ? days / rules.fairnessWindowDays : 0;
 
   const tierById = new Map(tiers.map((t) => [t.id, t]));
   const defByCode = new Map(shiftDefs.map((sd) => [sd.code, sd]));
@@ -408,13 +434,14 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
       if (pool.length < 2) continue;
 
       // Nothing to balance if nobody in the pool has any of this.
-      const raw = pool.map((i) => {
+      const inPeriod = pool.map(metric.inPeriod);
+      const combined = pool.map((i, k) => {
         const prior = priorByStaff.get(staff[i].id);
-        return metric.inPeriod(i) + (prior ? metric.prior(prior) : 0);
+        return inPeriod[k] + (prior ? metric.prior(prior) * priorScale : 0);
       });
-      if (raw.every((n) => n === 0)) continue;
+      if (combined.every((n) => n === 0)) continue;
 
-      const rates = pool.map((i, k) => raw[k] / Math.max(staff[i].fte, 0.01));
+      const rates = pool.map((i, k) => combined[k] / Math.max(staff[i].fte, 0.01));
       const meanRate = rates.reduce((a, b) => a + b, 0) / rates.length;
       fairnessCost += spread(rates) * metric.weight;
 
@@ -422,14 +449,15 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
         if (Math.abs(rates[k] - meanRate) <= metric.tolerance) return;
         const fte = staff[sIdx].fte;
         const perFte = fte === 1 ? "" : ` at ${fte} FTE`;
-        const window =
-          priorByStaff.size > 0 && rules.fairnessWindowDays > 0
-            ? ` over the last ${rules.fairnessWindowDays} days`
-            : "";
+        const context =
+          priorScale > 0 ? ` counting the last ${rules.fairnessWindowDays} days` : "";
+        // Report what they actually work this roster; the fair share is the
+        // pool average converted back from the per-FTE rate.
+        const share = (meanRate * fte).toFixed(1);
         violations.push({
           type: "UNFAIR_SHARE",
           severity: "SOFT",
-          message: `${staff[sIdx].name}: ${raw[k]} ${metric.label}${perFte}${window} (average ${meanRate.toFixed(1)})`,
+          message: `${staff[sIdx].name}: ${inPeriod[k]} ${metric.label}${perFte} against a fair share of ${share}${context}`,
           staffId: staff[sIdx].id,
           dayIndexes: [],
         });
@@ -439,14 +467,16 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
 
   const hardCount = violations.filter((v) => v.severity === "HARD").length;
   const softCount = violations.length - hardCount;
+  const hardCost = violations.reduce(
+    (sum, v) =>
+      v.severity === "HARD" ? sum + HARD_WEIGHT * (VIOLATION_WEIGHT[v.type] ?? 1) : sum,
+    0,
+  );
   return {
     hardCount,
     softCount,
     fairnessCost,
-    cost:
-      hardCount * HARD_WEIGHT +
-      softCount * SOFT_WEIGHT +
-      fairnessCost * FAIRNESS_WEIGHT,
+    cost: hardCost + softCount * SOFT_WEIGHT + fairnessCost * FAIRNESS_WEIGHT,
     violations,
   };
 }
