@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { syncRosterCommitments } from "@/lib/roster/commitments";
 import { evaluate } from "@/lib/roster/engine";
 import { loadSolverInput, toISODate } from "@/lib/roster/load";
 import { solve } from "@/lib/roster/solve";
@@ -73,6 +74,9 @@ async function buildRosterPayload(id: string) {
     tiers: input.tiers,
     tierPairings: input.tierPairings,
     shiftDefs: input.shiftDefs,
+    externalShifts: input.externalShifts,
+    homeWardId: input.homeWardId,
+    floatStaffIds: input.floatStaffIds,
     grid,
     evaluation,
   };
@@ -105,8 +109,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!roster) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json();
+  let assignmentsChanged = false;
 
   if (Array.isArray(body.edits)) {
+    assignmentsChanged = body.edits.length > 0;
     for (const e of body.edits) {
       await prisma.assignment.upsert({
         where: {
@@ -135,14 +141,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         }))
       ),
     });
+    assignmentsChanged = true;
   }
   if (body.status === "PUBLISHED" || body.status === "DRAFT") {
     await prisma.roster.update({ where: { id }, data: { status: body.status } });
+    // Publishing is what commits staff; unpublishing releases them.
+    assignmentsChanged = true;
+  }
+
+  // Keep the cross-ward commitment record in step.
+  let clashesWithOtherWards = 0;
+  if (assignmentsChanged) {
+    ({ skipped: clashesWithOtherWards } = await syncRosterCommitments(id));
   }
 
   const payload = await buildRosterPayload(id);
   if (!payload) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(payload);
+  return NextResponse.json({ ...payload, clashesWithOtherWards });
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {

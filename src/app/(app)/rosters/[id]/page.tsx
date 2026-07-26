@@ -34,6 +34,10 @@ interface RosterPayload {
   tiers: SolverInput["tiers"];
   tierPairings: SolverInput["tierPairings"];
   shiftDefs: SolverInput["shiftDefs"];
+  externalShifts: SolverInput["externalShifts"];
+  homeWardId: string;
+  /** Staff on this roster whose home ward is elsewhere. */
+  floatStaffIds: string[];
   grid: Grid;
   evaluation: Evaluation;
 }
@@ -68,6 +72,9 @@ export default function RosterPage() {
       tiers: data.tiers,
       tierPairings: data.tierPairings,
       shiftDefs: data.shiftDefs,
+      externalShifts: data.externalShifts,
+      homeWardId: data.homeWardId,
+      floatStaffIds: data.floatStaffIds,
     };
     return evaluate(input, grid);
   }, [data, grid]);
@@ -377,6 +384,7 @@ export default function RosterPage() {
                 onCycle={cycleCell}
                 shiftStyles={shiftStyles}
                 tally={shiftTally}
+                floatStaffIds={new Set(data.floatStaffIds)}
               />
             ))}
           </tbody>
@@ -453,6 +461,7 @@ function GroupRows({
   onCycle,
   shiftStyles,
   tally,
+  floatStaffIds,
 }: {
   group: { roleName: string; rows: { staff: SolverStaff; idx: number }[] };
   days: number;
@@ -463,6 +472,7 @@ function GroupRows({
   onCycle: (sIdx: number, d: number) => void;
   shiftStyles: Map<string, ShiftStyle>;
   tally: (row: CellValue[]) => number[];
+  floatStaffIds: Set<string>;
 }) {
   // A cell can hold a shift removed from the ward since the roster was made.
   const styleFor = (v: CellValue): ShiftStyle =>
@@ -489,6 +499,14 @@ function GroupRows({
           <tr key={staff.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
             <td className="sticky left-0 z-10 max-w-40 truncate border-b border-slate-100 dark:border-slate-800/50 bg-white dark:bg-slate-900 px-3 py-1.5 font-medium text-slate-900 dark:text-white">
               {staff.name}
+              {floatStaffIds.has(staff.id) && (
+                <span
+                  title="Based in another ward — floated in"
+                  className="ml-1.5 rounded bg-violet-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                >
+                  float
+                </span>
+              )}
             </td>
             {row.map((v, d) => {
               const off = offMap.get(`${staff.id}|${d}`);

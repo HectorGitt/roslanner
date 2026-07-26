@@ -3,8 +3,8 @@ import {
   DAY_OFF,
   Evaluation,
   Grid,
+  OffDay,
   Shift,
-  ShiftDef,
   SolverInput,
   Violation,
 } from "./types";
@@ -34,7 +34,10 @@ export function isWeekend(startDate: string, dayIndex: number): boolean {
  * Shift times are minutes-from-midnight; a shift flagged crossesMidnight ends
  * on the following calendar day.
  */
-export function restHoursBetween(prev: ShiftDef, next: ShiftDef): number {
+export function restHoursBetween(
+  prev: { endMinutes: number; crossesMidnight: boolean },
+  next: { startMinutes: number },
+): number {
   const prevEnd = prev.crossesMidnight ? prev.endMinutes + 24 * 60 : prev.endMinutes;
   const nextStart = next.startMinutes + 24 * 60; // next calendar day
   return (nextStart - prevEnd) / 60;
@@ -57,10 +60,15 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     tiers,
     tierPairings,
     shiftDefs,
+    externalShifts,
   } = input;
 
   const tierById = new Map(tiers.map((t) => [t.id, t]));
   const defByCode = new Map(shiftDefs.map((sd) => [sd.code, sd]));
+  // Shifts worked in other wards, keyed by staff+day (day -1 included).
+  const externalByStaffDay = new Map(
+    externalShifts.map((e) => [`${e.staffId}|${e.dayIndex}`, { ...e, label: e.shiftLabel }]),
+  );
   const isNight = (v: CellValue) => defByCode.get(v)?.isNightLike ?? false;
   // Shift codes actually present in this ward, in display order.
   const shiftCodes = shiftDefs.map((sd) => sd.code);
@@ -120,23 +128,35 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
   }
 
   // --- Off-day handling ---
-  const hardOff = new Set<string>();
+  const hardOff = new Map<string, OffDay>();
   const softOff = new Set<string>();
   for (const o of offDays) {
-    (o.hard ? hardOff : softOff).add(`${o.staffId}|${o.dayIndex}`);
+    if (o.hard) hardOff.set(`${o.staffId}|${o.dayIndex}`, o);
+    else softOff.add(`${o.staffId}|${o.dayIndex}`);
   }
   for (let s = 0; s < staff.length; s++) {
     for (let d = 0; d < days; d++) {
       if (!isWorkShift(grid[s][d])) continue;
       const key = `${staff[s].id}|${d}`;
-      if (hardOff.has(key)) {
-        violations.push({
-          type: "HARD_LEAVE_BROKEN",
-          severity: "HARD",
-          message: `${staff[s].name} is scheduled on approved leave (day ${d + 1})`,
-          staffId: staff[s].id,
-          dayIndexes: [d],
-        });
+      const blocked = hardOff.get(key);
+      if (blocked) {
+        violations.push(
+          blocked.reason === "OTHER_WARD"
+            ? {
+                type: "COMMITTED_ELSEWHERE",
+                severity: "HARD",
+                message: `${staff[s].name} is already working in ${blocked.detail ?? "another ward"} on day ${d + 1}`,
+                staffId: staff[s].id,
+                dayIndexes: [d],
+              }
+            : {
+                type: "HARD_LEAVE_BROKEN",
+                severity: "HARD",
+                message: `${staff[s].name} is scheduled on approved leave (day ${d + 1})`,
+                staffId: staff[s].id,
+                dayIndexes: [d],
+              },
+        );
       } else if (softOff.has(key)) {
         violations.push({
           type: "DO_REQUEST_UNMET",
@@ -155,20 +175,27 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     const name = staff[s].name;
     const tier = staff[s].tierId ? tierById.get(staff[s].tierId!) : undefined;
 
-    // Rest between consecutive days, from each shift's real times.
+    // Rest between consecutive days, from each shift's real times. A shift the
+    // person works in another ward counts too, so a floater can't finish late
+    // there and start early here.
     if (rules.minRestHours !== null) {
-      for (let d = 1; d < days; d++) {
-        const prev = defByCode.get(row[d - 1]);
+      for (let d = 0; d < days; d++) {
         const next = defByCode.get(row[d]);
-        if (!prev || !next) continue; // a day off resets rest
+        if (!next) continue; // a day off needs no rest check
+        // Yesterday was either a shift here, or one in another ward.
+        const here = d > 0 ? defByCode.get(row[d - 1]) : undefined;
+        const away = externalByStaffDay.get(`${staff[s].id}|${d - 1}`);
+        const prev = here ?? away;
+        if (!prev) continue;
         const rest = restHoursBetween(prev, next);
         if (rest < rules.minRestHours) {
+          const where = here ? "" : ` in ${away!.wardName}`;
           violations.push({
             type: "INSUFFICIENT_REST",
             severity: "HARD",
-            message: `${name}: only ${rest}h rest between ${prev.label} and ${next.label} (day ${d + 1}, min ${rules.minRestHours}h)`,
+            message: `${name}: only ${rest}h rest after ${prev.label}${where} before ${next.label} (day ${d + 1}, min ${rules.minRestHours}h)`,
             staffId: staff[s].id,
-            dayIndexes: [d - 1, d],
+            dayIndexes: d > 0 ? [d - 1, d] : [d],
           });
         }
       }

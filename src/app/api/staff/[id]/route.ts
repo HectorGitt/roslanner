@@ -17,7 +17,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const { name, roleId, active, tierId, fte, canBeLead } = await req.json();
+  const { name, roleId, active, tierId, fte, canBeLead, floatWardIds } = await req.json();
   if (roleId !== undefined) {
     const role = await prisma.role.findFirst({
       where: { id: roleId, hospitalId: guard.user.hospitalId },
@@ -42,7 +42,28 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     },
     include: { role: true, tier: true },
   });
-  return NextResponse.json(staff);
+
+  // Replace the set of extra wards this person can float into. Their home ward
+  // is always eligible and is never stored here.
+  if (Array.isArray(floatWardIds)) {
+    const wards = await prisma.ward.findMany({
+      where: { id: { in: floatWardIds }, hospitalId: guard.user.hospitalId },
+      select: { id: true },
+    });
+    const valid = wards.map((w) => w.id).filter((wid) => wid !== staff.wardId);
+    await prisma.$transaction([
+      prisma.staffWardEligibility.deleteMany({ where: { staffId: id } }),
+      prisma.staffWardEligibility.createMany({
+        data: valid.map((wardId) => ({ staffId: id, wardId })),
+      }),
+    ]);
+  }
+
+  const fresh = await prisma.staff.findUnique({
+    where: { id },
+    include: { role: true, tier: true, floatWards: { include: { ward: true } } },
+  });
+  return NextResponse.json(fresh);
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {

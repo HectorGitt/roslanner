@@ -105,6 +105,10 @@ function greedyConstruct(input: SolverInput): Grid {
   for (const o of input.offDays) {
     (o.hard ? hardOff : softOff).add(`${o.staffId}|${o.dayIndex}`);
   }
+  // Shifts worked in other wards, so cross-ward rest is respected while building.
+  const externalByStaffDay = new Map(
+    input.externalShifts.map((e) => [`${e.staffId}|${e.dayIndex}`, e]),
+  );
 
   // Running tallies for balanced picking
   const totalShifts = staff.map(() => 0);
@@ -144,9 +148,11 @@ function greedyConstruct(input: SolverInput): Grid {
               if (isWeekend(startDate, d) && rule?.weekendEligible === false) return false;
             }
 
-            // Rest since yesterday's shift, from real shift times
-            if (rules.minRestHours !== null && d > 0) {
-              const prev = defByCode.get(grid[i][d - 1]);
+            // Rest since yesterday's shift — here or in another ward
+            if (rules.minRestHours !== null) {
+              const prev =
+                (d > 0 ? defByCode.get(grid[i][d - 1]) : undefined) ??
+                externalByStaffDay.get(`${st.id}|${d - 1}`);
               if (prev && restHoursBetween(prev, shiftDef) < rules.minRestHours) {
                 return false;
               }

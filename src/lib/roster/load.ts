@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import {
   CoverageReq,
+  ExternalShift,
   OffDay,
   Rules,
   Shift,
@@ -31,8 +32,12 @@ export async function loadSolverInput(
 
   const [staff, requirements, ruleSet, shiftDefsRaw, tiersRaw, pairingsRaw] =
     await Promise.all([
+      // Staff based here, plus anyone from the float pool eligible for this ward.
       prisma.staff.findMany({
-        where: { wardId, active: true },
+        where: {
+          active: true,
+          OR: [{ wardId }, { floatWards: { some: { wardId } } }],
+        },
         include: { role: true, tier: true },
         orderBy: [{ role: { name: "asc" } }, { name: "asc" }],
       }),
@@ -98,8 +103,63 @@ export async function loadSolverInput(
     for (let d = 0; d < days; d++) {
       const day = addDays(startDate, d);
       if (day >= stripTime(l.startDate) && day <= stripTime(l.endDate)) {
-        offDays.push({ staffId: l.staffId, dayIndex: d, hard: l.type === "LEAVE" });
+        offDays.push({
+          staffId: l.staffId,
+          dayIndex: d,
+          hard: l.type === "LEAVE",
+          reason: l.type === "LEAVE" ? "LEAVE" : "REQUEST",
+        });
       }
+    }
+  }
+
+  // Days these people are already committed to another ward. Those days are
+  // unavailable here, and the shift they work there constrains rest either side
+  // — including the day before this roster starts.
+  const externalCommitments = await prisma.staffDailyCommitment.findMany({
+    where: {
+      staffId: { in: staffIds },
+      wardId: { not: wardId },
+      date: { gte: addDays(startDate, -1), lt: periodEnd },
+    },
+    include: { ward: { select: { name: true } } },
+  });
+
+  // Shift times come from the *other* ward's definitions.
+  const otherShiftDefs = await prisma.shiftDefinition.findMany({
+    where: {
+      wardId: { in: [...new Set(externalCommitments.map((c) => c.wardId))] },
+    },
+  });
+  const otherDefKey = new Map(
+    otherShiftDefs.map((sd) => [`${sd.wardId}|${sd.code}`, sd]),
+  );
+
+  const externalShifts: ExternalShift[] = [];
+  for (const c of externalCommitments) {
+    const dayIndex = Math.round(
+      (stripTime(c.date).getTime() - stripTime(startDate).getTime()) / 86_400_000,
+    );
+    const def = otherDefKey.get(`${c.wardId}|${c.shiftCode}`);
+    if (!def) continue; // that ward dropped the shift; nothing to compare times against
+    externalShifts.push({
+      staffId: c.staffId,
+      dayIndex,
+      startMinutes: def.startMinutes,
+      endMinutes: def.endMinutes,
+      crossesMidnight: def.crossesMidnight,
+      shiftLabel: def.label,
+      wardName: c.ward.name,
+    });
+    // Days inside this period are simply unavailable here.
+    if (dayIndex >= 0 && dayIndex < days) {
+      offDays.push({
+        staffId: c.staffId,
+        dayIndex,
+        hard: true,
+        reason: "OTHER_WARD",
+        detail: c.ward.name,
+      });
     }
   }
 
@@ -134,6 +194,9 @@ export async function loadSolverInput(
     tiers,
     tierPairings,
     shiftDefs,
+    externalShifts,
+    homeWardId: wardId,
+    floatStaffIds: staff.filter((s) => s.wardId !== wardId).map((s) => s.id),
   };
 }
 

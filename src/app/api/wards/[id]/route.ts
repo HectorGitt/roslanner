@@ -12,10 +12,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const ward = await prisma.ward.findFirst({
     where: { id, hospitalId: guard.user.hospitalId },
     include: {
-      staff: { include: { role: true, tier: true }, orderBy: { name: "asc" } },
+      staff: {
+        include: { role: true, tier: true, floatWards: { include: { ward: true } } },
+        orderBy: { name: "asc" },
+      },
       requirements: true,
       rules: true,
       shiftDefinitions: { orderBy: { sortOrder: "asc" } },
+      // People based in other wards who can also be rostered here.
+      floatStaff: {
+        include: { staff: { include: { role: true, tier: true, ward: true } } },
+      },
     },
   });
   if (!ward) return NextResponse.json({ error: "Not found" }, { status: 404 });

@@ -21,6 +21,11 @@ interface StaffRow {
   role: Role;
   tierId: string | null;
   tier: Tier | null;
+  floatWards: { wardId: string; ward: { id: string; name: string } }[];
+}
+/** Someone based in another ward who can also be rostered here. */
+interface FloatIn {
+  staff: { id: string; name: string; role: Role; tier: Tier | null; ward: { id: string; name: string } };
 }
 interface ShiftDef {
   id: string;
@@ -54,6 +59,7 @@ interface Ward {
   requirements: Requirement[];
   rules: Rules | null;
   shiftDefinitions: ShiftDef[];
+  floatStaff: FloatIn[];
 }
 
 const DEFAULT_RULES: Rules = {
@@ -71,19 +77,22 @@ export default function WardDetailPage() {
   const [ward, setWard] = useState<Ward | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
   const [tiers, setTiers] = useState<Tier[]>([]);
+  const [otherWards, setOtherWards] = useState<{ id: string; name: string }[]>([]);
   const [tab, setTab] = useState<Tab>("staff");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
-    const [w, r, t] = await Promise.all([
+    const [w, r, t, all] = await Promise.all([
       api<Ward>(`/api/wards/${id}`),
       api<Role[]>("/api/roles"),
       api<Tier[]>("/api/tiers"),
+      api<{ id: string; name: string }[]>("/api/wards"),
     ]);
     setWard(w);
     setRoles(r);
     setTiers(t);
+    setOtherWards(all.filter((x) => x.id !== id));
   }, [id]);
 
   useEffect(() => {
@@ -133,7 +142,13 @@ export default function WardDetailPage() {
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
       {tab === "staff" && (
-        <StaffTab ward={ward} roles={roles} tiers={tiers} onChanged={load} />
+        <StaffTab
+          ward={ward}
+          roles={roles}
+          tiers={tiers}
+          otherWards={otherWards}
+          onChanged={load}
+        />
       )}
       {tab === "shifts" && (
         <ShiftsTab
@@ -175,11 +190,13 @@ function StaffTab({
   ward,
   roles,
   tiers,
+  otherWards,
   onChanged,
 }: {
   ward: Ward;
   roles: Role[];
   tiers: Tier[];
+  otherWards: { id: string; name: string }[];
   onChanged: () => void;
 }) {
   const [name, setName] = useState("");
@@ -211,6 +228,14 @@ function StaffTab({
     await api(`/api/staff/${staffId}`, {
       method: "PATCH",
       body: JSON.stringify({ tierId: newTierId || null }),
+    });
+    onChanged();
+  }
+
+  async function setFloatWards(s: StaffRow, wardIds: string[]) {
+    await api(`/api/staff/${s.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ floatWardIds: wardIds }),
     });
     onChanged();
   }
@@ -285,47 +310,127 @@ function StaffTab({
         {ward.staff.map((s) => (
           <div
             key={s.id}
-            className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/50 px-5 py-4 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+            className="border-b border-slate-100 dark:border-slate-800/50 px-5 py-4 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
           >
-            <div className="flex items-center gap-3">
-              <span className={`font-medium ${s.active ? "text-slate-900 dark:text-white" : "text-slate-400 dark:text-slate-600 line-through"}`}>
-                {s.name}
-              </span>
-              <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400">
-                {s.role.name}
-              </span>
-              {tiers.length > 0 && (
-                <select
-                  value={s.tierId ?? ""}
-                  onChange={(e) => changeTier(s.id, e.target.value)}
-                  className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400"
+            <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className={`font-medium ${s.active ? "text-slate-900 dark:text-white" : "text-slate-400 dark:text-slate-600 line-through"}`}>
+                  {s.name}
+                </span>
+                <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400">
+                  {s.role.name}
+                </span>
+                {tiers.length > 0 && (
+                  <select
+                    value={s.tierId ?? ""}
+                    onChange={(e) => changeTier(s.id, e.target.value)}
+                    className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400"
+                  >
+                    <option value="">No tier</option>
+                    {tiers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div className="flex gap-4 text-xs font-medium">
+                <button
+                  onClick={() => toggleActive(s)}
+                  className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
                 >
-                  <option value="">No tier</option>
-                  {tiers.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
+                  {s.active ? "Deactivate" : "Activate"}
+                </button>
+                <button
+                  onClick={() => removeStaff(s.id, s.name)}
+                  className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+            {otherWards.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-slate-400 dark:text-slate-500">Can also work:</span>
+                {s.floatWards.length === 0 && (
+                  <span className="text-slate-400 dark:text-slate-600">this ward only</span>
+                )}
+                {s.floatWards.map((fw) => (
+                  <button
+                    key={fw.wardId}
+                    onClick={() =>
+                      setFloatWards(
+                        s,
+                        s.floatWards.filter((x) => x.wardId !== fw.wardId).map((x) => x.wardId),
+                      )
+                    }
+                    title="Remove"
+                    className="group flex items-center gap-1 rounded-md bg-teal-50 dark:bg-teal-500/10 px-2 py-0.5 text-teal-700 dark:text-teal-300 hover:bg-rose-50 dark:hover:bg-rose-500/10 hover:text-rose-700 dark:hover:text-rose-300"
+                  >
+                    {fw.ward.name}
+                    <span className="text-teal-400 group-hover:text-rose-500">&times;</span>
+                  </button>
+                ))}
+                <select
+                  value=""
+                  onChange={(e) =>
+                    e.target.value &&
+                    setFloatWards(s, [...s.floatWards.map((x) => x.wardId), e.target.value])
+                  }
+                  className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-1.5 py-0.5 text-xs text-slate-500 dark:text-slate-400"
+                >
+                  <option value="">+ ward</option>
+                  {otherWards
+                    .filter((w) => !s.floatWards.some((fw) => fw.wardId === w.id))
+                    .map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name}
+                      </option>
+                    ))}
                 </select>
-              )}
-            </div>
-            <div className="flex gap-4 text-xs font-medium">
-              <button
-                onClick={() => toggleActive(s)}
-                className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
-              >
-                {s.active ? "Deactivate" : "Activate"}
-              </button>
-              <button
-                onClick={() => removeStaff(s.id, s.name)}
-                className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-              >
-                Delete
-              </button>
-            </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
+
+      {ward.floatStaff.length > 0 && (
+        <div>
+          <h2 className="mb-1 text-sm font-semibold text-slate-900 dark:text-white">
+            Also available here
+          </h2>
+          <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+            Based in another ward but eligible to be rostered here. They can&apos;t be
+            booked on a day they&apos;re already working elsewhere.
+          </p>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+            {ward.floatStaff.map(({ staff: fs }) => (
+              <div
+                key={fs.id}
+                className="flex flex-wrap items-center gap-3 border-b border-slate-100 dark:border-slate-800/50 px-5 py-3 last:border-0 text-sm"
+              >
+                <span className="font-medium text-slate-900 dark:text-white">{fs.name}</span>
+                <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400">
+                  {fs.role.name}
+                </span>
+                {fs.tier && (
+                  <span className="text-xs text-slate-500 dark:text-slate-400">{fs.tier.name}</span>
+                )}
+                <span className="text-xs text-slate-400 dark:text-slate-500">
+                  based in{" "}
+                  <Link
+                    href={`/wards/${fs.ward.id}`}
+                    className="underline hover:text-slate-600 dark:hover:text-slate-300"
+                  >
+                    {fs.ward.name}
+                  </Link>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

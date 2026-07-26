@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { syncRosterCommitments } from "@/lib/roster/commitments";
 import { loadSolverInput } from "@/lib/roster/load";
 import { solve } from "@/lib/roster/solve";
 import { requireHospitalUser } from "@/lib/session";
@@ -81,8 +82,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  const { skipped } = await syncRosterCommitments(roster.id);
+
   return NextResponse.json(
-    { rosterId: roster.id, evaluation: result.evaluation, elapsedMs: result.elapsedMs },
+    {
+      rosterId: roster.id,
+      evaluation: result.evaluation,
+      elapsedMs: result.elapsedMs,
+      clashesWithOtherWards: skipped,
+    },
     { status: 201 },
   );
 }

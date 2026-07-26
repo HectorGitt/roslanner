@@ -89,6 +89,26 @@ export interface OffDay {
   staffId: string;
   dayIndex: number;
   hard: boolean;
+  reason: "LEAVE" | "REQUEST" | "OTHER_WARD";
+  /** For OTHER_WARD, the ward they're committed to. */
+  detail?: string;
+}
+
+/**
+ * A shift a floater works in a *different* ward during (or just before) this
+ * period. Pre-resolved so rest checks can span wards without the engine
+ * touching the database. dayIndex may be -1: the day before this roster starts
+ * still constrains day 0.
+ */
+export interface ExternalShift {
+  staffId: string;
+  dayIndex: number;
+  startMinutes: number;
+  endMinutes: number;
+  crossesMidnight: boolean;
+  /** That ward's name for the shift, e.g. "Call Duty". */
+  shiftLabel: string;
+  wardName: string;
 }
 
 export interface SolverInput {
@@ -103,6 +123,12 @@ export interface SolverInput {
   tierPairings: TierPairing[];
   /** The ward's shift vocabulary. Empty means nothing can be scheduled. */
   shiftDefs: ShiftDef[];
+  /** Shifts these people work in other wards, for cross-ward rest checks. */
+  externalShifts: ExternalShift[];
+  /** The ward being rostered. */
+  homeWardId: string;
+  /** Staff in this roster whose home ward is elsewhere (float pool). */
+  floatStaffIds: string[];
 }
 
 /** grid[staffIndex][dayIndex] — staff order matches input.staff. */
@@ -119,7 +145,8 @@ export type ViolationType =
   | "DO_REQUEST_UNMET"
   | "UNFAIR_SHARE"
   | "TIER_SHIFT_INELIGIBLE"
-  | "TIER_PAIRING_UNMET";
+  | "TIER_PAIRING_UNMET"
+  | "COMMITTED_ELSEWHERE";
 
 export interface Violation {
   type: ViolationType;

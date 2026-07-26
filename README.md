@@ -84,6 +84,14 @@ Nothing about the shift model is hardcoded — each hospital configures its own.
   consecutive nights, min days off per week, and minimum rest hours between
   shifts — computed from the shifts' actual times, so it catches any too-quick
   turnaround rather than just a morning after a night.
+- **Floating staff**: someone based in one ward can be made eligible for others.
+  Wards are rostered independently, so a `StaffDailyCommitment` row per person
+  per date — unique on (staff, date) — is what makes double-booking impossible to
+  record and visible when attempted. Rest is checked across wards too, so a
+  floater can't finish call duty at 08:00 and start a morning shift elsewhere the
+  same hour. Only **published** rosters commit anyone: drafts are proposals, so
+  two drafts for one period don't collide with each other, and a draft is still
+  checked against other wards' published rosters.
 - **Leave**: approved leave is a hard constraint; day-off requests are honoured
   when possible (soft).
 - **Fairness**: nights, weekend shifts and total shifts are balanced across staff

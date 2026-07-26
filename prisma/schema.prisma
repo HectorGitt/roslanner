@@ -100,9 +100,47 @@ model Ward {
   rosters          Roster[]
   rules            RuleSet?
   shiftDefinitions ShiftDefinition[]
+  /// Staff based elsewhere who may also be rostered here (float pool).
+  floatStaff       StaffWardEligibility[]
+  commitments      StaffDailyCommitment[]
   createdAt        DateTime              @default(now())
 
   @@unique([hospitalId, name])
+}
+
+/// Lets a staff member be rostered in a ward that isn't their home ward.
+/// Their home ward (Staff.wardId) is always eligible without a row here.
+model StaffWardEligibility {
+  id        String   @id @default(cuid())
+  staffId   String
+  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  wardId    String
+  ward      Ward     @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([staffId, wardId])
+}
+
+/// One row per person per calendar date they are working, across every ward.
+/// Wards are rostered independently, so this is what stops a floater being
+/// booked in two wards on the same day: the unique index makes it impossible
+/// to record two commitments for one person on one date, whatever code path
+/// tries. Derived from Assignment and kept in step with it.
+model StaffDailyCommitment {
+  id           String     @id @default(cuid())
+  staffId      String
+  staff        Staff      @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  /// Absolute calendar date (midnight) — the point is cross-ward comparability.
+  date         DateTime
+  wardId       String
+  ward         Ward       @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  rosterId     String
+  roster       Roster     @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  assignmentId String     @unique
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  shiftCode    String
+
+  @@unique([staffId, date])
 }
 
 // A configurable shift for a ward — replaces the assumption that every ward
@@ -190,20 +228,23 @@ model Role {
 }
 
 model Staff {
-  id            String         @id @default(cuid())
-  name          String
-  roleId        String
-  role          Role           @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  wardId        String
-  ward          Ward           @relation(fields: [wardId], references: [id], onDelete: Cascade)
-  tierId        String?
-  tier          StaffTier?     @relation(fields: [tierId], references: [id], onDelete: SetNull)
-  fte           Float          @default(1.0)
-  canBeLead     Boolean        @default(false)
-  active        Boolean        @default(true)
-  leaveRequests LeaveRequest[]
-  assignments   Assignment[]
-  createdAt     DateTime       @default(now())
+  id             String                 @id @default(cuid())
+  name           String
+  roleId         String
+  role           Role                   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  /// Home ward. Additional wards they can float into live in StaffWardEligibility.
+  wardId         String
+  ward           Ward                   @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  tierId         String?
+  tier           StaffTier?             @relation(fields: [tierId], references: [id], onDelete: SetNull)
+  fte            Float                  @default(1.0)
+  canBeLead      Boolean                @default(false)
+  active         Boolean                @default(true)
+  leaveRequests  LeaveRequest[]
+  assignments    Assignment[]
+  floatWards     StaffWardEligibility[]
+  commitments    StaffDailyCommitment[]
+  createdAt      DateTime               @default(now())
 }
 
 /// Required headcount for a ward + shift, scoped by role, tier, or both:
@@ -257,25 +298,29 @@ model LeaveRequest {
 }
 
 model Roster {
-  id          String       @id @default(cuid())
+  id          String                 @id @default(cuid())
   wardId      String
-  ward        Ward         @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  ward        Ward                   @relation(fields: [wardId], references: [id], onDelete: Cascade)
   startDate   DateTime
   days        Int
-  status      String       @default("DRAFT") // DRAFT | PUBLISHED
+  status      String                 @default("DRAFT") // DRAFT | PUBLISHED
   assignments Assignment[]
-  createdAt   DateTime     @default(now())
+  commitments StaffDailyCommitment[]
+  createdAt   DateTime               @default(now())
 }
 
-// shift: "MORNING" | "AFTERNOON" | "NIGHT" | "DO"
+/// `shift` holds the ward's ShiftDefinition.code, or "DO" for a day off.
+/// Deliberately not a foreign key: a published roster is a record of what was
+/// worked, so it must survive a ward changing or removing a shift later.
 model Assignment {
-  id       String @id @default(cuid())
-  rosterId String
-  roster   Roster @relation(fields: [rosterId], references: [id], onDelete: Cascade)
-  staffId  String
-  staff    Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  dayIndex Int
-  shift    String
+  id         String                @id @default(cuid())
+  rosterId   String
+  roster     Roster                @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  staffId    String
+  staff      Staff                 @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  dayIndex   Int
+  shift      String
+  commitment StaffDailyCommitment?
 
   @@unique([rosterId, staffId, dayIndex])
 }
