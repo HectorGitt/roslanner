@@ -281,8 +281,18 @@ model CoverageRequirement {
   tierId   String?
   tier     StaffTier? @relation(fields: [tierId], references: [id], onDelete: Cascade)
   required Int
+  /// Days of the week this applies to, 0 = Sunday … 6 = Saturday.
+  /// Empty means every day — which is what every requirement used to mean, so
+  /// existing rows keep their behaviour. Lets a clinic close at the weekend or a
+  /// ward run lighter weekend cover.
+  daysOfWeek Int[]    @default([])
+  /// How public holidays are treated:
+  ///   SAME    – follow the day of week the holiday falls on (default)
+  ///   EXCLUDE – don't apply on holidays (clinic shut)
+  ///   ONLY    – apply only on holidays (skeleton holiday cover)
+  holidayRule String  @default("SAME")
 
-  @@unique([wardId, shift, roleId, tierId])
+  @@unique([wardId, shift, roleId, tierId, holidayRule])
 }
 
 // Per-ward scheduling rules.

@@ -42,6 +42,8 @@ interface Requirement {
   roleId: string | null;
   tierId: string | null;
   required: number;
+  daysOfWeek: number[];
+  holidayRule: string;
 }
 interface Rules {
   maxConsecutiveDays: number;
@@ -463,6 +465,31 @@ function CoverageTab({
     }
     return v;
   });
+  // Day scoping is per requirement row (role or tier), not per cell — a clinic
+  // shuts on the same days whichever session you look at.
+  const [scoping, setScoping] = useState<Record<string, { days: number[]; holidayRule: string }>>(
+    () => {
+      const m: Record<string, { days: number[]; holidayRule: string }> = {};
+      for (const r of ward.requirements) {
+        const scope = r.tierId
+          ? rowKey("tier", r.tierId)
+          : r.roleId
+            ? rowKey("role", r.roleId)
+            : null;
+        if (scope) m[scope] = { days: r.daysOfWeek ?? [], holidayRule: r.holidayRule ?? "SAME" };
+      }
+      return m;
+    },
+  );
+  const scopeOf = (scope: string) => scoping[scope] ?? { days: [], holidayRule: "SAME" };
+  const toggleDay = (scope: string, dow: number) =>
+    setScoping((m) => {
+      const cur = scopeOf(scope);
+      const days = cur.days.includes(dow)
+        ? cur.days.filter((d) => d !== dow)
+        : [...cur.days, dow].sort();
+      return { ...m, [scope]: { ...cur, days } };
+    });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -485,11 +512,14 @@ function CoverageTab({
         .map(([key, required]) => {
           const [shift, scope] = key.split('|');
           const [kind, id] = scope.split(':');
+          const sc = scopeOf(scope);
           return {
             shift,
             roleId: kind === 'role' ? id : null,
             tierId: kind === 'tier' ? id : null,
             required: Number(required),
+            daysOfWeek: sc.days,
+            holidayRule: sc.holidayRule,
           };
         });
       await api('/api/coverage', {
@@ -527,12 +557,56 @@ function CoverageTab({
     );
   };
 
+  const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+  const dayPickerFor = (scope: string) => {
+    const sc = scopeOf(scope);
+    const everyDay = sc.days.length === 0;
+    return (
+      <td key="days" className="px-5 py-3 whitespace-nowrap">
+        <div className="flex items-center gap-0.5">
+          {DOW.map((label, dow) => {
+            const on = everyDay || sc.days.includes(dow);
+            return (
+              <button
+                key={dow}
+                type="button"
+                onClick={() => toggleDay(scope, dow)}
+                title={everyDay ? "Applies every day — click to restrict" : label}
+                className={`h-6 w-6 rounded text-[10px] font-medium transition-colors ${
+                  on
+                    ? "bg-teal-100 text-teal-800 dark:bg-teal-500/20 dark:text-teal-300"
+                    : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+          <select
+            value={sc.holidayRule}
+            onChange={(e) =>
+              setScoping((m) => ({ ...m, [scope]: { ...sc, holidayRule: e.target.value } }))
+            }
+            title="How public holidays are treated"
+            className="ml-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-600 dark:text-slate-400"
+          >
+            <option value="SAME">holidays: as normal</option>
+            <option value="EXCLUDE">holidays: closed</option>
+            <option value="ONLY">holidays only</option>
+          </select>
+        </div>
+      </td>
+    );
+  };
+
   return (
-    <div className="max-w-3xl space-y-5">
+    <div className="max-w-5xl space-y-5">
       <p className="text-sm text-slate-500 dark:text-slate-400">
-        Minimum staff on duty for each shift, every day. Role rows cover skill mix;
+        Minimum staff on duty for each shift. Role rows cover skill mix;
         tier rows set a seniority floor (e.g. at least one senior on every shift),
-        and both are enforced together.
+        and both are enforced together. Use <span className="font-medium">Applies on</span>{" "}
+        to limit a requirement to certain days — a clinic that shuts at the weekend, or
+        lighter cover on public holidays.
       </p>
       <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
         <table className="w-full text-sm">
@@ -544,6 +618,7 @@ function CoverageTab({
                   {sd.label}
                 </th>
               ))}
+              <th className="px-5 py-3 font-medium">Applies on</th>
             </tr>
           </thead>
           <tbody>
@@ -554,12 +629,13 @@ function CoverageTab({
               >
                 <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">{r.name}</td>
                 {shifts.map((sd) => cellFor(sd.code, rowKey('role', r.id)))}
+                {dayPickerFor(rowKey('role', r.id))}
               </tr>
             ))}
             {tiers.length > 0 && (
               <tr className="border-b border-slate-100 dark:border-slate-800/50 bg-slate-50/60 dark:bg-slate-800/30">
                 <td
-                  colSpan={shifts.length + 1}
+                  colSpan={shifts.length + 2}
                   className="px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
                 >
                   Seniority floors
@@ -578,6 +654,7 @@ function CoverageTab({
                   </span>
                 </td>
                 {shifts.map((sd) => cellFor(sd.code, rowKey('tier', t.id)))}
+                {dayPickerFor(rowKey('tier', t.id))}
               </tr>
             ))}
           </tbody>

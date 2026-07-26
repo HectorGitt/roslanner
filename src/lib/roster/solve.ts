@@ -1,4 +1,10 @@
-import { evaluate, isWeekend, isWorkShift, restHoursBetween } from "./engine";
+import {
+  coverageAppliesOn,
+  evaluate,
+  isWeekend,
+  isWorkShift,
+  restHoursBetween,
+} from "./engine";
 import {
   CellValue,
   DAY_OFF,
@@ -131,7 +137,9 @@ function greedyConstruct(input: SolverInput): Grid {
   for (let d = 0; d < days; d++) {
     for (const shiftDef of shiftOrder) {
       const shift = shiftDef.code;
-      for (const req of coverage.filter((c) => c.shift === shift)) {
+      for (const req of coverage.filter(
+        (c) => c.shift === shift && coverageAppliesOn(c, d, startDate, holidayDays),
+      )) {
         let needed = req.required;
         if (needed <= 0) continue;
 

@@ -1,6 +1,7 @@
 import { addDays, dayOfWeek as dayOfWeekUTC, parseISODate } from "@/lib/dates";
 import {
   CellValue,
+  CoverageReq,
   DAY_OFF,
   Evaluation,
   Grid,
@@ -107,6 +108,7 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
   // --- Coverage per day/shift, scoped by role and/or tier ---
   for (let d = 0; d < days; d++) {
     for (const req of coverage) {
+      if (!coverageAppliesOn(req, d, startDate, isHoliday)) continue;
       let have = 0;
       for (let s = 0; s < staff.length; s++) {
         if (grid[s][d] !== req.shift) continue;
@@ -479,6 +481,24 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     cost: hardCost + softCount * SOFT_WEIGHT + fairnessCost * FAIRNESS_WEIGHT,
     violations,
   };
+}
+
+/**
+ * Whether a coverage requirement is in force on a given day. Requirements used
+ * to apply to every day, which can't express a clinic that shuts at weekends or
+ * skeleton cover on a public holiday.
+ */
+export function coverageAppliesOn(
+  req: CoverageReq,
+  dayIndex: number,
+  startDate: string,
+  isHoliday: Set<number>,
+): boolean {
+  const holiday = isHoliday.has(dayIndex);
+  if (req.holidayRule === "ONLY") return holiday;
+  if (req.holidayRule === "EXCLUDE" && holiday) return false;
+  if (req.daysOfWeek.length === 0) return true;
+  return req.daysOfWeek.includes(dayOfWeek(startDate, dayIndex));
 }
 
 function shiftLabel(input: SolverInput, code: Shift): string {

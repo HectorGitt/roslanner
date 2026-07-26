@@ -19,7 +19,13 @@ interface CoverageInput {
   roleId?: string | null;
   tierId?: string | null;
   required: number;
+  /** 0 = Sunday … 6 = Saturday. Omitted or empty = every day. */
+  daysOfWeek?: number[];
+  /** SAME (default) | EXCLUDE | ONLY — how public holidays are treated. */
+  holidayRule?: string;
 }
+
+const HOLIDAY_RULES = new Set(["SAME", "EXCLUDE", "ONLY"]);
 
 /**
  * Replace a ward's coverage requirements:
@@ -62,6 +68,8 @@ export async function PUT(req: NextRequest) {
     roleId: string | null;
     tierId: string | null;
     required: number;
+    daysOfWeek: number[];
+    holidayRule: string;
   }[] = [];
   for (const raw of items as CoverageInput[]) {
     const required = Number(raw.required) || 0;
@@ -78,12 +86,22 @@ export async function PUT(req: NextRequest) {
     if (raw.tierId && !validTiers.has(raw.tierId)) {
       return NextResponse.json({ error: "Invalid tier" }, { status: 400 });
     }
+    const holidayRule = raw.holidayRule ?? "SAME";
+    if (!HOLIDAY_RULES.has(holidayRule)) {
+      return NextResponse.json({ error: "Invalid holiday rule" }, { status: 400 });
+    }
+    // Seven entries means "every day", which is what an empty list already says.
+    const days = [...new Set((raw.daysOfWeek ?? []).map(Number))]
+      .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+      .sort();
     data.push({
       wardId,
       shift: raw.shift,
       roleId: raw.roleId || null,
       tierId: raw.tierId || null,
       required,
+      daysOfWeek: days.length === 7 ? [] : days,
+      holidayRule,
     });
   }
 

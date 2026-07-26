@@ -2,6 +2,7 @@ import { addDays, daysBetween, parseISODate, startOfDay, toISODate } from "@/lib
 import { prisma } from "@/lib/db";
 import {
   CoverageReq,
+  HolidayRule,
   ExternalShift,
   OffDay,
   PriorStats,
@@ -174,6 +175,8 @@ export async function loadSolverInput(
       roleId: r.roleId ?? undefined,
       tierId: r.tierId ?? undefined,
       required: r.required,
+      daysOfWeek: r.daysOfWeek,
+      holidayRule: r.holidayRule as HolidayRule,
     }));
 
   const rules = ruleSet ?? DEFAULT_RULES;

@@ -64,15 +64,21 @@ export interface TierPairing {
   shift?: Shift;
 }
 
+/** How a coverage requirement treats public holidays. */
+export type HolidayRule = "SAME" | "EXCLUDE" | "ONLY";
+
 /**
- * Required headcount for one shift, scoped by role and/or tier.
- * Both undefined = plain headcount for the shift.
+ * Required headcount for one shift, scoped by role and/or tier (both undefined =
+ * plain headcount), and optionally by day of week and holidays.
  */
 export interface CoverageReq {
   shift: Shift;
   roleId?: string;
   tierId?: string;
   required: number;
+  /** 0 = Sunday … 6 = Saturday. Empty = every day. */
+  daysOfWeek: number[];
+  holidayRule: HolidayRule;
 }
 
 export interface Rules {
