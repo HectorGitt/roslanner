@@ -115,8 +115,6 @@ model ShiftDefinition {
   isNightLike     Boolean  @default(false)
   payrollTag      String?
   sortOrder       Int      @default(0)
-  tierEligibility TierShiftEligibility[]
-  pairingRules    TierPairingRule[]
 
   @@unique([wardId, code])
 }
@@ -141,31 +139,37 @@ model StaffTier {
 }
 
 // Per-tier, per-shift eligibility (e.g. Tier 1 = Morning only, never weekends/holidays).
+// Keyed by shift *code*, not a ward's ShiftDefinition row: "interns can't work
+// call duty" is a statement about the hospital's shift vocabulary, so one rule
+// applies in every ward that has that shift. Keying it per-ward would force
+// re-entering the same rule for each ward and silently enforce nothing in any
+// ward an admin hadn't visited.
 model TierShiftEligibility {
-  id              String          @id @default(cuid())
+  id              String    @id @default(cuid())
   tierId          String
-  tier            StaffTier       @relation(fields: [tierId], references: [id], onDelete: Cascade)
-  shiftDefId      String
-  shiftDef        ShiftDefinition @relation(fields: [shiftDefId], references: [id], onDelete: Cascade)
-  eligible        Boolean         @default(true)
-  weekendEligible Boolean         @default(true)
-  holidayEligible Boolean         @default(true)
+  tier            StaffTier @relation(fields: [tierId], references: [id], onDelete: Cascade)
+  shiftCode       String
+  eligible        Boolean   @default(true)
+  weekendEligible Boolean   @default(true)
+  holidayEligible Boolean   @default(true)
 
-  @@unique([tierId, shiftDefId])
+  @@unique([tierId, shiftCode])
 }
 
 // "Tier 3 must always have >=N of Tier 2 present" style pairing requirement.
 model TierPairingRule {
-  id               String           @id @default(cuid())
+  id               String    @id @default(cuid())
   dependentTierId  String
-  dependentTier    StaffTier        @relation("Dependent", fields: [dependentTierId], references: [id], onDelete: Cascade)
+  dependentTier    StaffTier @relation("Dependent", fields: [dependentTierId], references: [id], onDelete: Cascade)
   requiredTierId   String
-  requiredTier     StaffTier        @relation("Required", fields: [requiredTierId], references: [id], onDelete: Cascade)
-  minRequiredCount Int              @default(1)
-  shiftDefId       String?          // null = applies to every shift
-  shiftDef         ShiftDefinition? @relation(fields: [shiftDefId], references: [id], onDelete: Cascade)
+  requiredTier     StaffTier @relation("Required", fields: [requiredTierId], references: [id], onDelete: Cascade)
+  minRequiredCount Int       @default(1)
+  /// Shift code this applies to; null = every shift. NOTE: Postgres treats NULLs
+  /// as distinct, so this unique index does NOT stop duplicate all-shift rules —
+  /// the API checks for an existing rule before creating one.
+  shiftCode        String?
 
-  @@unique([dependentTierId, requiredTierId, shiftDefId])
+  @@unique([dependentTierId, requiredTierId, shiftCode])
 }
 
 model Role {

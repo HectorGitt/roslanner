@@ -2,64 +2,79 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireHospitalUser } from "@/lib/session";
 
-export async function GET(req: NextRequest) {
+/**
+ * Tier shift eligibility is hospital-wide, keyed by shift code — one rule
+ * applies in every ward that uses that shift. Returns the eligibility rows
+ * plus the hospital's shift-code vocabulary (the distinct codes across all
+ * its wards) so the UI can render the tier x shift matrix.
+ */
+export async function GET() {
   const guard = await requireHospitalUser();
   if (guard.response) return guard.response;
 
-  const wardId = req.nextUrl.searchParams.get("wardId");
-  if (!wardId) return NextResponse.json({ error: "wardId required" }, { status: 400 });
+  const [items, shiftDefs] = await Promise.all([
+    prisma.tierShiftEligibility.findMany({
+      where: { tier: { hospitalId: guard.user.hospitalId } },
+    }),
+    prisma.shiftDefinition.findMany({
+      where: { ward: { hospitalId: guard.user.hospitalId } },
+      orderBy: [{ sortOrder: "asc" }, { code: "asc" }],
+    }),
+  ]);
 
-  const ward = await prisma.ward.findFirst({
-    where: { id: wardId, hospitalId: guard.user.hospitalId },
-    select: { id: true },
-  });
-  if (!ward) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Collapse per-ward definitions into the shared code vocabulary.
+  const shifts: { code: string; label: string; isNightLike: boolean }[] = [];
+  for (const sd of shiftDefs) {
+    if (!shifts.some((s) => s.code === sd.code)) {
+      shifts.push({ code: sd.code, label: sd.label, isNightLike: sd.isNightLike });
+    }
+  }
 
-  const items = await prisma.tierShiftEligibility.findMany({
-    where: { shiftDef: { wardId } },
-  });
-  return NextResponse.json(items);
+  return NextResponse.json({ items, shifts });
 }
 
-/** Bulk upsert eligibility for a ward: { wardId, items: [{tierId, shiftDefId, eligible, weekendEligible}] } */
+/** Bulk replace: { items: [{tierId, shiftCode, eligible, weekendEligible}] } */
 export async function PUT(req: NextRequest) {
   const guard = await requireHospitalUser();
   if (guard.response) return guard.response;
 
-  const { wardId, items } = await req.json();
-  if (!wardId || !Array.isArray(items)) {
-    return NextResponse.json({ error: "wardId and items required" }, { status: 400 });
+  const { items } = await req.json();
+  if (!Array.isArray(items)) {
+    return NextResponse.json({ error: "items required" }, { status: 400 });
   }
-  const ward = await prisma.ward.findFirst({
-    where: { id: wardId, hospitalId: guard.user.hospitalId },
-    include: { shiftDefinitions: true },
-  });
-  if (!ward) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const validShiftDefIds = new Set(ward.shiftDefinitions.map((s) => s.id));
-  const validTierIds = new Set(
-    (
-      await prisma.staffTier.findMany({
-        where: { hospitalId: guard.user.hospitalId },
-        select: { id: true },
-      })
-    ).map((t) => t.id),
-  );
+  const [tiers, shiftDefs] = await Promise.all([
+    prisma.staffTier.findMany({
+      where: { hospitalId: guard.user.hospitalId },
+      select: { id: true },
+    }),
+    prisma.shiftDefinition.findMany({
+      where: { ward: { hospitalId: guard.user.hospitalId } },
+      select: { code: true },
+    }),
+  ]);
+  const validTierIds = new Set(tiers.map((t) => t.id));
+  const validCodes = new Set(shiftDefs.map((s) => s.code));
 
-  const safeItems = items.filter(
-    (i: { tierId: string; shiftDefId: string }) =>
-      validShiftDefIds.has(i.shiftDefId) && validTierIds.has(i.tierId),
+  const safe = items.filter(
+    (i: { tierId: string; shiftCode: string }) =>
+      validTierIds.has(i.tierId) && validCodes.has(i.shiftCode),
   );
 
   await prisma.$transaction([
     prisma.tierShiftEligibility.deleteMany({
-      where: { shiftDefId: { in: [...validShiftDefIds] } },
+      where: { tier: { hospitalId: guard.user.hospitalId } },
     }),
     prisma.tierShiftEligibility.createMany({
-      data: safeItems.map(
-        (i: { tierId: string; shiftDefId: string; eligible: boolean; weekendEligible: boolean }) => ({
+      data: safe.map(
+        (i: {
+          tierId: string;
+          shiftCode: string;
+          eligible: boolean;
+          weekendEligible: boolean;
+        }) => ({
           tierId: i.tierId,
-          shiftDefId: i.shiftDefId,
+          shiftCode: i.shiftCode,
           eligible: i.eligible,
           weekendEligible: i.weekendEligible,
         }),
@@ -68,7 +83,7 @@ export async function PUT(req: NextRequest) {
   ]);
 
   const saved = await prisma.tierShiftEligibility.findMany({
-    where: { shiftDef: { wardId } },
+    where: { tier: { hospitalId: guard.user.hospitalId } },
   });
   return NextResponse.json(saved);
 }

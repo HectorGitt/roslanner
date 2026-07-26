@@ -20,7 +20,7 @@ export async function loadSolverInput(
     select: { hospitalId: true },
   });
 
-  const [staff, requirements, ruleSet, shiftDefs, tiersRaw, pairingsRaw] = await Promise.all([
+  const [staff, requirements, ruleSet, tiersRaw, pairingsRaw] = await Promise.all([
     prisma.staff.findMany({
       where: { wardId, active: true },
       include: { role: true, tier: true },
@@ -28,7 +28,6 @@ export async function loadSolverInput(
     }),
     prisma.coverageRequirement.findMany({ where: { wardId } }),
     prisma.ruleSet.findUnique({ where: { wardId } }),
-    prisma.shiftDefinition.findMany({ where: { wardId } }),
     prisma.staffTier.findMany({
       where: { hospitalId: ward.hospitalId },
       include: { shiftEligibility: true },
@@ -38,33 +37,27 @@ export async function loadSolverInput(
     }),
   ]);
 
-  // Tier shift-eligibility/pairing rows are keyed by shiftDefId, which is
-  // ward-specific — resolve back to the shift code this ward uses.
-  const shiftCodeById = new Map(shiftDefs.map((sd) => [sd.id, sd.code as Shift]));
-
+  // Tier rules are keyed by shift code, so they apply in every ward that uses
+  // that shift — no per-ward resolution needed.
   const tiers: TierInfo[] = tiersRaw.map((t) => ({
     id: t.id,
     name: t.name,
     countsTowardClinicalCoverage: t.countsTowardClinicalCoverage,
     maxConsecutiveNights: t.maxConsecutiveNights,
-    shiftRules: t.shiftEligibility
-      .filter((e) => shiftCodeById.has(e.shiftDefId))
-      .map((e) => ({
-        shift: shiftCodeById.get(e.shiftDefId)!,
-        eligible: e.eligible,
-        weekendEligible: e.weekendEligible,
-        holidayEligible: e.holidayEligible,
-      })),
+    shiftRules: t.shiftEligibility.map((e) => ({
+      shift: e.shiftCode as Shift,
+      eligible: e.eligible,
+      weekendEligible: e.weekendEligible,
+      holidayEligible: e.holidayEligible,
+    })),
   }));
 
-  const tierPairings: TierPairing[] = pairingsRaw
-    .filter((p) => !p.shiftDefId || shiftCodeById.has(p.shiftDefId))
-    .map((p) => ({
-      dependentTierId: p.dependentTierId,
-      requiredTierId: p.requiredTierId,
-      minRequiredCount: p.minRequiredCount,
-      shift: p.shiftDefId ? shiftCodeById.get(p.shiftDefId) : undefined,
-    }));
+  const tierPairings: TierPairing[] = pairingsRaw.map((p) => ({
+    dependentTierId: p.dependentTierId,
+    requiredTierId: p.requiredTierId,
+    minRequiredCount: p.minRequiredCount,
+    shift: (p.shiftCode as Shift | null) ?? undefined,
+  }));
 
   const staffIds = staff.map((s) => s.id);
   const periodEnd = addDays(startDate, days); // exclusive

@@ -37,17 +37,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid tier" }, { status: 400 });
   }
 
-  try {
-    const pairing = await prisma.tierPairingRule.create({
-      data: {
-        dependentTierId,
-        requiredTierId,
-        minRequiredCount: Number(minRequiredCount) || 1,
-      },
-      include: { dependentTier: true, requiredTier: true },
-    });
-    return NextResponse.json(pairing, { status: 201 });
-  } catch {
+  // Postgres treats NULLs as distinct, so the unique index on
+  // (dependentTierId, requiredTierId, shiftCode) does not stop duplicate
+  // all-shift rules — check explicitly.
+  const existing = await prisma.tierPairingRule.findFirst({
+    where: { dependentTierId, requiredTierId, shiftCode: null },
+  });
+  if (existing) {
     return NextResponse.json({ error: "That pairing rule already exists" }, { status: 409 });
   }
+
+  const pairing = await prisma.tierPairingRule.create({
+    data: {
+      dependentTierId,
+      requiredTierId,
+      minRequiredCount: Number(minRequiredCount) || 1,
+    },
+    include: { dependentTier: true, requiredTier: true },
+  });
+  return NextResponse.json(pairing, { status: 201 });
 }

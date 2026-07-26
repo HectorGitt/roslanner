@@ -39,6 +39,11 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
   const tierById = new Map(tiers.map((t) => [t.id, t]));
 
   // --- Coverage per day/shift/role ---
+  // NOTE: StaffTier.countsTowardClinicalCoverage is deliberately NOT applied to
+  // role-based requirements. Role coverage is already role-specific (a porter
+  // never satisfies a "Nurse" requirement), and excluding support staff here
+  // would make an explicit support-role requirement unsatisfiable. The flag
+  // takes effect for tier-scoped coverage requirements.
   for (let d = 0; d < days; d++) {
     const counts = new Map<string, number>(); // `${shift}|${roleId}` -> assigned
     for (let s = 0; s < staff.length; s++) {
@@ -164,7 +169,11 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
         }
       }
     }
-    const effectiveMaxNights = tier?.maxConsecutiveNights ?? rules.maxConsecutiveNights;
+    // A tier override may only tighten the ward's limit, never loosen it.
+    const effectiveMaxNights = Math.min(
+      rules.maxConsecutiveNights,
+      tier?.maxConsecutiveNights ?? Infinity,
+    );
 
     // Consecutive working days / nights
     let run = 0;

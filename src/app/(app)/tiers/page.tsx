@@ -17,12 +17,26 @@ interface PairingRow {
   dependentTier: { id: string; name: string };
   requiredTier: { id: string; name: string };
 }
+interface ShiftOption {
+  code: string;
+  label: string;
+  isNightLike: boolean;
+}
+interface EligibilityRow {
+  tierId: string;
+  shiftCode: string;
+  eligible: boolean;
+  weekendEligible: boolean;
+}
 
 export default function TiersPage() {
   const [tiers, setTiers] = useState<TierRow[]>([]);
   const [pairings, setPairings] = useState<PairingRow[]>([]);
+  const [shifts, setShifts] = useState<ShiftOption[]>([]);
+  const [eligibility, setEligibility] = useState<EligibilityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const [name, setName] = useState("");
   const [rank, setRank] = useState(0);
@@ -34,10 +48,16 @@ export default function TiersPage() {
   const [minRequiredCount, setMinRequiredCount] = useState(1);
 
   const load = () =>
-    Promise.all([api<TierRow[]>("/api/tiers"), api<PairingRow[]>("/api/tier-pairings")])
-      .then(([t, p]) => {
+    Promise.all([
+      api<TierRow[]>("/api/tiers"),
+      api<PairingRow[]>("/api/tier-pairings"),
+      api<{ items: EligibilityRow[]; shifts: ShiftOption[] }>("/api/tier-eligibility"),
+    ])
+      .then(([t, p, e]) => {
         setTiers(t);
         setPairings(p);
+        setEligibility(e.items);
+        setShifts(e.shifts);
       })
       .finally(() => setLoading(false));
 
@@ -101,8 +121,8 @@ export default function TiersPage() {
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Staff tiers</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">
           Your own staff hierarchy — e.g. Senior Executive, Core Clinical, Rotational, Support.
-          Tiers control shift eligibility (set per ward, in the ward&apos;s Tiers tab) and
-          pairing requirements below.
+          Shift eligibility and pairing rules below apply across every ward that uses
+          the shift, so you only set them once.
         </p>
       </div>
 
@@ -147,7 +167,12 @@ export default function TiersPage() {
             onChange={(e) => setCounts(e.target.checked)}
             className="h-4 w-4 accent-teal-600"
           />
-          <span className="font-medium text-slate-900 dark:text-white">Counts toward clinical coverage</span>
+          <span
+            className="font-medium text-slate-900 dark:text-white"
+            title="Uncheck for support staff (porters, attendants). Applies to tier-scoped coverage rules; role-based coverage is already role-specific."
+          >
+            Counts toward clinical coverage
+          </span>
         </label>
         <button className="rounded-xl bg-teal-600 px-5 py-2 text-sm font-medium text-white hover:bg-teal-700 shadow-sm shadow-teal-600/20">
           Add tier
@@ -181,6 +206,20 @@ export default function TiersPage() {
           </div>
         ))}
       </div>
+
+      {tiers.length > 0 && shifts.length > 0 && (
+        <EligibilityMatrix
+          tiers={tiers}
+          shifts={shifts}
+          eligibility={eligibility}
+          onSaved={() => {
+            setNotice("Shift eligibility saved.");
+            setTimeout(() => setNotice(""), 2500);
+            load();
+          }}
+        />
+      )}
+      {notice && <p className="text-sm text-emerald-600 dark:text-emerald-400">{notice}</p>}
 
       <div>
         <h2 className="mb-1 text-lg font-semibold text-slate-900 dark:text-white">Pairing rules</h2>
@@ -258,6 +297,127 @@ export default function TiersPage() {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function EligibilityMatrix({
+  tiers,
+  shifts,
+  eligibility,
+  onSaved,
+}: {
+  tiers: TierRow[];
+  shifts: ShiftOption[];
+  eligibility: EligibilityRow[];
+  onSaved: () => void;
+}) {
+  // A missing row means "eligible" — the engine only restricts where a row says otherwise.
+  const [rows, setRows] = useState<
+    Record<string, { eligible: boolean; weekendEligible: boolean }>
+  >(() => {
+    const map: Record<string, { eligible: boolean; weekendEligible: boolean }> = {};
+    for (const e of eligibility) {
+      map[`${e.tierId}|${e.shiftCode}`] = {
+        eligible: e.eligible,
+        weekendEligible: e.weekendEligible,
+      };
+    }
+    return map;
+  });
+  const [saving, setSaving] = useState(false);
+
+  const get = (tierId: string, code: string) =>
+    rows[`${tierId}|${code}`] ?? { eligible: true, weekendEligible: true };
+
+  const set = (
+    tierId: string,
+    code: string,
+    patch: Partial<{ eligible: boolean; weekendEligible: boolean }>,
+  ) =>
+    setRows((r) => ({
+      ...r,
+      [`${tierId}|${code}`]: { ...get(tierId, code), ...patch },
+    }));
+
+  async function save() {
+    setSaving(true);
+    const items = tiers.flatMap((t) =>
+      shifts.map((s) => ({ tierId: t.id, shiftCode: s.code, ...get(t.id, s.code) })),
+    );
+    await api("/api/tier-eligibility", { method: "PUT", body: JSON.stringify({ items }) });
+    setSaving(false);
+    onSaved();
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="mb-1 text-lg font-semibold text-slate-900 dark:text-white">
+          Shift eligibility
+        </h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Which shifts each tier may work. Uncheck a shift to bar the tier from it (e.g.
+          senior staff on mornings only); uncheck <span className="font-medium">Weekends</span>{" "}
+          to keep a tier off weekend duty entirely.
+        </p>
+      </div>
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-left text-slate-700 dark:text-slate-300">
+              <th className="px-5 py-3 font-medium">Tier</th>
+              {shifts.map((s) => (
+                <th key={s.code} className="px-5 py-3 font-medium">
+                  {s.label}
+                </th>
+              ))}
+              <th className="px-5 py-3 font-medium">Weekends</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tiers.map((t) => (
+              <tr
+                key={t.id}
+                className="border-b border-slate-100 dark:border-slate-800/50 last:border-0"
+              >
+                <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">
+                  {t.name}
+                </td>
+                {shifts.map((s) => (
+                  <td key={s.code} className="px-5 py-3">
+                    <input
+                      type="checkbox"
+                      checked={get(t.id, s.code).eligible}
+                      onChange={(e) => set(t.id, s.code, { eligible: e.target.checked })}
+                      className="h-4 w-4 accent-teal-600"
+                    />
+                  </td>
+                ))}
+                <td className="px-5 py-3">
+                  <input
+                    type="checkbox"
+                    checked={shifts.every((s) => get(t.id, s.code).weekendEligible)}
+                    onChange={(e) =>
+                      shifts.forEach((s) =>
+                        set(t.id, s.code, { weekendEligible: e.target.checked }),
+                      )
+                    }
+                    className="h-4 w-4 accent-teal-600"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button
+        onClick={save}
+        disabled={saving}
+        className="rounded-xl bg-teal-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm shadow-teal-600/20"
+      >
+        {saving ? "Saving…" : "Save shift eligibility"}
+      </button>
     </div>
   );
 }

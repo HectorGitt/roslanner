@@ -135,7 +135,10 @@ function greedyConstruct(input: SolverInput): Grid {
               if (shiftRule?.eligible === false) return false;
               if (isWeekend(startDate, d) && shiftRule?.weekendEligible === false) return false;
             }
-            const maxNights = tier?.maxConsecutiveNights ?? rules.maxConsecutiveNights;
+            const maxNights = Math.min(
+              rules.maxConsecutiveNights,
+              tier?.maxConsecutiveNights ?? Infinity,
+            );
             if (
               shift === "NIGHT" &&
               consecutiveNightsEndingBefore(grid[i], d) >= maxNights
