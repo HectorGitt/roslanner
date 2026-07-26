@@ -30,7 +30,8 @@ export async function PUT(req: NextRequest) {
     maxNightsPerWeek: Number(data.maxNightsPerWeek),
     minDaysOffPerWeek: Number(data.minDaysOffPerWeek),
     maxConsecutiveNights: Number(data.maxConsecutiveNights),
-    noMorningAfterNight: Boolean(data.noMorningAfterNight),
+    minRestHours:
+      data.minRestHours === null || data.minRestHours === "" ? null : Number(data.minRestHours),
   };
   const rules = await prisma.ruleSet.upsert({
     where: { wardId },

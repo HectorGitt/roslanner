@@ -68,14 +68,26 @@ belongs to one **hospital** workspace:
 
 ## How it works
 
-- **Shifts**: Morning / Afternoon / Night / DO (day off), one per person per day.
-- **Coverage** (per ward): how many of each role each shift needs, every day.
+Nothing about the shift model is hardcoded — each hospital configures its own.
+
+- **Shifts** (per ward): a ward defines its own shifts with real clock times, and
+  flags which count as nights. Morning/Afternoon/Night, Day vs overnight Call
+  Duty, or clinic sessions are all just data; new wards start from a preset and
+  stay editable. One shift per person per day, or a day off.
+- **Cycle length** (per ward): 7 days for weekly wards, 30 for a monthly stretch.
+- **Staff tiers** (per hospital): your own hierarchy, with per-shift eligibility
+  (e.g. senior staff on mornings only, never weekends), tier-specific night caps,
+  and pairing rules (an intern is never rostered without a senior present).
+- **Coverage** (per ward): minimum staff per shift, scoped by role, by tier, or
+  both — so "2 nurses" and "at least one senior, any role" are enforced together.
 - **Rules** (per ward): max consecutive working days, max nights per week, max
-  consecutive nights, min days off per week, no morning straight after a night.
+  consecutive nights, min days off per week, and minimum rest hours between
+  shifts — computed from the shifts' actual times, so it catches any too-quick
+  turnaround rather than just a morning after a night.
 - **Leave**: approved leave is a hard constraint; day-off requests are honoured
   when possible (soft).
-- **Fairness**: nights, weekend shifts and total shifts are balanced across
-  staff of the same role.
+- **Fairness**: nights, weekend shifts and total shifts are balanced across staff
+  of the same role, comparing only staff eligible for that kind of shift.
 
 ### Solver
 

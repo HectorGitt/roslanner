@@ -86,16 +86,21 @@ model Verification {
 // ===== Rostering =====
 
 model Ward {
-  id              String                @id @default(cuid())
-  name            String
-  hospitalId      String
-  hospital        Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
-  requirements    CoverageRequirement[]
-  staff           Staff[]
-  rosters         Roster[]
-  rules           RuleSet?
+  id               String                @id @default(cuid())
+  name             String
+  hospitalId       String
+  hospital         Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  /// Hospital's own label for the ward type ("Standard", "Call Duty",
+  /// "Outpatient Clinic", …) — free text, deliberately not a fixed enum.
+  category         String                @default("Standard")
+  /// Days in one roster cycle: 7 for weekly wards, 30 for monthly stretches.
+  cycleLengthDays  Int                   @default(7)
+  requirements     CoverageRequirement[]
+  staff            Staff[]
+  rosters          Roster[]
+  rules            RuleSet?
   shiftDefinitions ShiftDefinition[]
-  createdAt       DateTime              @default(now())
+  createdAt        DateTime              @default(now())
 
   @@unique([hospitalId, name])
 }
@@ -130,6 +135,7 @@ model StaffTier {
   countsTowardClinicalCoverage Boolean  @default(true)
   maxConsecutiveNights         Int?
   staff                        Staff[]
+  requirements                 CoverageRequirement[]
   shiftEligibility             TierShiftEligibility[]
   requiredPairingsAsDependent  TierPairingRule[] @relation("Dependent")
   requiredPairingsAsRequired   TierPairingRule[] @relation("Required")
@@ -200,30 +206,42 @@ model Staff {
   createdAt     DateTime       @default(now())
 }
 
-// Required headcount for a ward + shift + role.
-// shift: "MORNING" | "AFTERNOON" | "NIGHT"
+/// Required headcount for a ward + shift, scoped by role, tier, or both:
+///   roleId set, tierId null → "2 Nurses"
+///   roleId null, tierId set → "at least 1 Core Clinical" (the safety floor)
+///   both set               → "1 Nurse who is also Core Clinical"
+///   both null              → plain headcount for the shift
+/// `shift` holds the ward's ShiftDefinition.code (not an FK — see Assignment).
+/// NOTE: Postgres treats NULLs as distinct so these unique indexes don't fully
+/// prevent duplicates; the coverage endpoint replaces a ward's rows wholesale.
 model CoverageRequirement {
-  id       String @id @default(cuid())
+  id       String     @id @default(cuid())
   wardId   String
-  ward     Ward   @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  ward     Ward       @relation(fields: [wardId], references: [id], onDelete: Cascade)
   shift    String
-  roleId   String
-  role     Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  roleId   String?
+  role     Role?      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  tierId   String?
+  tier     StaffTier? @relation(fields: [tierId], references: [id], onDelete: Cascade)
   required Int
 
-  @@unique([wardId, shift, roleId])
+  @@unique([wardId, shift, roleId, tierId])
 }
 
 // Per-ward scheduling rules.
 model RuleSet {
-  id                   String  @id @default(cuid())
-  wardId               String  @unique
-  ward                 Ward    @relation(fields: [wardId], references: [id], onDelete: Cascade)
-  maxConsecutiveDays   Int     @default(6)
-  maxNightsPerWeek     Int     @default(3)
-  minDaysOffPerWeek    Int     @default(1)
-  noMorningAfterNight  Boolean @default(true)
-  maxConsecutiveNights Int     @default(4)
+  id                   String @id @default(cuid())
+  wardId               String @unique
+  ward                 Ward   @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  maxConsecutiveDays   Int    @default(6)
+  maxNightsPerWeek     Int    @default(3)
+  minDaysOffPerWeek    Int    @default(1)
+  maxConsecutiveNights Int    @default(4)
+  /// Minimum hours between the end of one shift and the start of the next,
+  /// computed from each shift's actual times. Replaces the old
+  /// noMorningAfterNight boolean, which couldn't express the 11–12h rest
+  /// requirement or cope with wards whose shifts aren't 8/16/22. Null = unenforced.
+  minRestHours         Int?   @default(8)
 }
 
 // type: "LEAVE" (hard — must be off) | "DAY_OFF_REQUEST" (soft preference)

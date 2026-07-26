@@ -5,6 +5,13 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { evaluate, isWeekend } from "@/lib/roster/engine";
+import {
+  buildShiftStyles,
+  DAY_OFF_STYLE,
+  formatShiftTime,
+  type ShiftStyle,
+} from "@/lib/roster/shift-style";
+import { DAY_OFF } from "@/lib/roster/types";
 import type {
   CellValue,
   Evaluation,
@@ -12,7 +19,6 @@ import type {
   OffDay,
   SolverInput,
   SolverStaff,
-  Violation,
 } from "@/lib/roster/types";
 
 interface RosterPayload {
@@ -27,25 +33,10 @@ interface RosterPayload {
   rules: SolverInput["rules"];
   tiers: SolverInput["tiers"];
   tierPairings: SolverInput["tierPairings"];
+  shiftDefs: SolverInput["shiftDefs"];
   grid: Grid;
   evaluation: Evaluation;
 }
-
-const CYCLE: CellValue[] = ["MORNING", "AFTERNOON", "NIGHT", "DO"];
-
-const CELL_STYLE: Record<CellValue, string> = {
-  MORNING: "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30",
-  AFTERNOON: "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/30",
-  NIGHT: "bg-indigo-500 text-white border-indigo-600 dark:bg-indigo-500/30 dark:text-indigo-200 dark:border-indigo-500/40",
-  DO: "bg-slate-100 text-slate-400 border-slate-200 dark:bg-slate-800/50 dark:text-slate-500 dark:border-slate-700/50",
-};
-
-const CELL_SHORT: Record<CellValue, string> = {
-  MORNING: "M",
-  AFTERNOON: "A",
-  NIGHT: "N",
-  DO: "–",
-};
 
 export default function RosterPage() {
   const { id } = useParams<{ id: string }>();
@@ -76,9 +67,21 @@ export default function RosterPage() {
       offDays: data.offDays,
       tiers: data.tiers,
       tierPairings: data.tierPairings,
+      shiftDefs: data.shiftDefs,
     };
     return evaluate(input, grid);
   }, [data, grid]);
+
+  // Cell colours/labels come from the ward's own shift definitions.
+  const shiftStyles = useMemo(
+    () => buildShiftStyles(data?.shiftDefs ?? []),
+    [data?.shiftDefs],
+  );
+  // Clicking a cell walks the ward's shifts in order, then a day off.
+  const cycle = useMemo<CellValue[]>(
+    () => [...(data?.shiftDefs ?? []).map((sd) => sd.code), DAY_OFF],
+    [data?.shiftDefs],
+  );
 
   // Cells involved in hard violations → red ring
   const badCells = useMemo(() => {
@@ -113,8 +116,11 @@ export default function RosterPage() {
   if (!data || !evaluation) return <p className="text-slate-500">Loading…</p>;
 
   function cycleCell(sIdx: number, d: number) {
+    if (cycle.length === 0) return;
     const current = grid[sIdx][d];
-    const next = CYCLE[(CYCLE.indexOf(current) + 1) % CYCLE.length];
+    const at = cycle.indexOf(current);
+    // An unknown code (a shift removed since this roster was made) steps to the first shift.
+    const next = cycle[(at + 1) % cycle.length];
     setGrid((g) => {
       const copy = g.map((row) => [...row]);
       copy[sIdx][d] = next;
@@ -198,21 +204,24 @@ export default function RosterPage() {
   const hard = evaluation.violations.filter((v) => v.severity === "HARD");
   const soft = evaluation.violations.filter((v) => v.severity === "SOFT");
 
+  /** Per-shift counts for one staff row, in the ward's shift order. */
+  function shiftTally(row: CellValue[]): number[] {
+    return data!.shiftDefs.map((sd) => row.filter((v) => v === sd.code).length);
+  }
+  const tallyHeader = data.shiftDefs.map((sd) => shiftStyles.get(sd.code)?.short ?? sd.code).join("/");
+
   function exportCsv() {
     if (!data) return;
-    const headers = ["Staff", ...dayHeaders.map(h => `${h.dow} ${h.num}`), "M/A/N"];
+    const headers = ["Staff", ...dayHeaders.map((h) => `${h.dow} ${h.num}`), tallyHeader];
     const rows = [headers.join(",")];
     groups.forEach(g => {
       rows.push(`"${g.roleName}",${Array(data.days + 1).fill("").join(",")}`);
       g.rows.forEach(({ staff, idx }) => {
         const row = grid[idx];
-        const m = row.filter((v) => v === "MORNING").length;
-        const a = row.filter((v) => v === "AFTERNOON").length;
-        const n = row.filter((v) => v === "NIGHT").length;
         const rowData = [
           `"${staff.name}"`,
-          ...row.map(v => v === "DO" ? "OFF" : v),
-          `"${m}/${a}/${n}"`
+          ...row.map((v) => (v === DAY_OFF ? "OFF" : v)),
+          `"${shiftTally(row).join("/")}"`,
         ];
         rows.push(rowData.join(","));
       });
@@ -300,24 +309,27 @@ export default function RosterPage() {
       {error && <p className="text-sm text-red-600 print:hidden">{error}</p>}
 
       <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-slate-400 print:hidden">
+        {data.shiftDefs.map((sd) => {
+          const style = shiftStyles.get(sd.code)!;
+          return (
+            <span key={sd.code} className="flex items-center gap-1.5">
+              <i className={`inline-block h-4 w-4 rounded border ${style.className}`} />
+              {sd.label}
+              <span className="text-slate-400 dark:text-slate-600">
+                {formatShiftTime(sd.startMinutes)}–{formatShiftTime(sd.endMinutes)}
+              </span>
+            </span>
+          );
+        })}
         <span className="flex items-center gap-1.5">
-          <i className="inline-block h-4 w-4 rounded border border-amber-200 bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/20" />
-          Morning
-        </span>
-        <span className="flex items-center gap-1.5">
-          <i className="inline-block h-4 w-4 rounded border border-sky-200 bg-sky-100 dark:border-sky-500/30 dark:bg-sky-500/20" />
-          Afternoon
-        </span>
-        <span className="flex items-center gap-1.5">
-          <i className="inline-block h-4 w-4 rounded border border-indigo-600 bg-indigo-500 dark:border-indigo-500/40 dark:bg-indigo-500/30" />
-          Night
-        </span>
-        <span className="flex items-center gap-1.5">
-          <i className="inline-block h-4 w-4 rounded border border-slate-200 bg-slate-100 dark:border-slate-700/50 dark:bg-slate-800/50" />
+          <i className={`inline-block h-4 w-4 rounded border ${DAY_OFF_STYLE}`} />
           Day off
         </span>
         <span className="text-slate-400 dark:text-slate-600">·</span>
-        <span>Click a cell to cycle Morning → Afternoon → Night → DO</span>
+        <span>
+          Click a cell to cycle{" "}
+          {[...data.shiftDefs.map((sd) => sd.label), "off"].join(" → ")}
+        </span>
         <span className="text-slate-400 dark:text-slate-600">·</span>
         <span>
           <b className="text-rose-600 dark:text-rose-400">L</b> leave &nbsp;
@@ -344,8 +356,11 @@ export default function RosterPage() {
                   {shortDays.has(h.d) && <div title="Coverage shortfall">⚠</div>}
                 </th>
               ))}
-              <th className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2 py-2 text-center font-medium text-slate-500 dark:text-slate-400">
-                M/A/N
+              <th
+                className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2 py-2 text-center font-medium text-slate-500 dark:text-slate-400"
+                title={data.shiftDefs.map((sd) => sd.label).join(" / ")}
+              >
+                {tallyHeader}
               </th>
             </tr>
           </thead>
@@ -360,6 +375,8 @@ export default function RosterPage() {
                 badCells={badCells}
                 offMap={offMap}
                 onCycle={cycleCell}
+                shiftStyles={shiftStyles}
+                tally={shiftTally}
               />
             ))}
           </tbody>
@@ -434,6 +451,8 @@ function GroupRows({
   badCells,
   offMap,
   onCycle,
+  shiftStyles,
+  tally,
 }: {
   group: { roleName: string; rows: { staff: SolverStaff; idx: number }[] };
   days: number;
@@ -442,7 +461,18 @@ function GroupRows({
   badCells: Set<string>;
   offMap: Map<string, "hard" | "soft">;
   onCycle: (sIdx: number, d: number) => void;
+  shiftStyles: Map<string, ShiftStyle>;
+  tally: (row: CellValue[]) => number[];
 }) {
+  // A cell can hold a shift removed from the ward since the roster was made.
+  const styleFor = (v: CellValue): ShiftStyle =>
+    shiftStyles.get(v) ?? {
+      code: v,
+      label: `${v} (removed)`,
+      short: "?",
+      className:
+        "bg-rose-100 text-rose-700 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-500/40",
+    };
   return (
     <>
       <tr>
@@ -455,9 +485,6 @@ function GroupRows({
       </tr>
       {group.rows.map(({ staff, idx }) => {
         const row = grid[idx];
-        const m = row.filter((v) => v === "MORNING").length;
-        const a = row.filter((v) => v === "AFTERNOON").length;
-        const n = row.filter((v) => v === "NIGHT").length;
         return (
           <tr key={staff.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
             <td className="sticky left-0 z-10 max-w-40 truncate border-b border-slate-100 dark:border-slate-800/50 bg-white dark:bg-slate-900 px-3 py-1.5 font-medium text-slate-900 dark:text-white">
@@ -466,6 +493,7 @@ function GroupRows({
             {row.map((v, d) => {
               const off = offMap.get(`${staff.id}|${d}`);
               const bad = badCells.has(`${staff.id}|${d}`);
+              const style = styleFor(v);
               return (
                 <td
                   key={d}
@@ -475,14 +503,14 @@ function GroupRows({
                 >
                   <button
                     onClick={() => onCycle(idx, d)}
-                    title={`${staff.name} — day ${d + 1}: ${v.toLowerCase()}${
+                    title={`${staff.name} — day ${d + 1}: ${style.label}${
                       off === "hard" ? " (on leave)" : off === "soft" ? " (requested off)" : ""
                     }`}
-                    className={`relative flex h-8 w-8 items-center justify-center rounded border text-[11px] font-semibold transition ${CELL_STYLE[v]} ${
+                    className={`relative flex h-8 w-8 items-center justify-center rounded border text-[11px] font-semibold transition ${style.className} ${
                       bad ? "ring-2 ring-rose-500" : "hover:scale-105"
                     }`}
                   >
-                    {CELL_SHORT[v]}
+                    {style.short}
                     {off && (
                       <span
                         className={`absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] font-bold text-white ${
@@ -497,7 +525,7 @@ function GroupRows({
               );
             })}
             <td className="border-b border-slate-100 dark:border-slate-800/50 px-2 text-center text-slate-500 dark:text-slate-400">
-              {m}/{a}/{n}
+              {tally(row).join("/")}
             </td>
           </tr>
         );

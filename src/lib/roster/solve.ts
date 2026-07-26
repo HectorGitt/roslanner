@@ -1,9 +1,10 @@
-import { evaluate, isWeekend, isWorkShift } from "./engine";
+import { evaluate, isWeekend, isWorkShift, restHoursBetween } from "./engine";
 import {
   CellValue,
+  DAY_OFF,
   Grid,
   Shift,
-  SHIFTS,
+  ShiftDef,
   SolveResult,
   SolverInput,
 } from "./types";
@@ -14,9 +15,12 @@ const MAX_ITERATIONS = 60_000;
 /**
  * Two-phase heuristic solver:
  *  1. Greedy day-by-day construction that fills coverage while respecting
- *     hard rest rules and leave.
+ *     hard rest/eligibility rules and leave.
  *  2. Local search (hill climbing with occasional sideways moves) over
  *     swap / reassign moves, scored by the shared evaluate() function.
+ *
+ * The shift vocabulary comes entirely from input.shiftDefs, so a ward running
+ * Day/Call-Duty is solved by the same code as one running Morning/Afternoon/Night.
  */
 export function solve(input: SolverInput): SolveResult {
   const started = Date.now();
@@ -26,6 +30,7 @@ export function solve(input: SolverInput): SolveResult {
   let iterations = 0;
   const nStaff = input.staff.length;
   const roleMates = buildRoleMates(input);
+  const cellChoices: CellValue[] = [...input.shiftDefs.map((sd) => sd.code), DAY_OFF];
 
   while (
     iterations < MAX_ITERATIONS &&
@@ -55,7 +60,8 @@ export function solve(input: SolverInput): SolveResult {
       // Reassign a single cell to a different value
       const s = randInt(nStaff);
       const old = grid[s][d];
-      const choices = CELL_CHOICES.filter((c) => c !== old);
+      const choices = cellChoices.filter((c) => c !== old);
+      if (choices.length === 0) continue;
       const next = choices[randInt(choices.length)];
       grid[s][d] = next;
       undo = () => {
@@ -80,8 +86,6 @@ export function solve(input: SolverInput): SolveResult {
   };
 }
 
-const CELL_CHOICES: CellValue[] = ["MORNING", "AFTERNOON", "NIGHT", "DO"];
-
 function buildRoleMates(input: SolverInput): number[][] {
   return input.staff.map((s, i) =>
     input.staff
@@ -91,9 +95,10 @@ function buildRoleMates(input: SolverInput): number[][] {
 }
 
 function greedyConstruct(input: SolverInput): Grid {
-  const { days, staff, coverage, rules, tiers, startDate } = input;
-  const grid: Grid = staff.map(() => Array<CellValue>(days).fill("DO"));
+  const { days, staff, coverage, rules, tiers, shiftDefs, startDate } = input;
+  const grid: Grid = staff.map(() => Array<CellValue>(days).fill(DAY_OFF));
   const tierById = new Map(tiers.map((t) => [t.id, t]));
+  const defByCode = new Map(shiftDefs.map((sd) => [sd.code, sd]));
 
   const hardOff = new Set<string>();
   const softOff = new Set<string>();
@@ -105,11 +110,15 @@ function greedyConstruct(input: SolverInput): Grid {
   const totalShifts = staff.map(() => 0);
   const totalNights = staff.map(() => 0);
 
-  // Fill nights first (most constrained), then mornings, then afternoons.
-  const shiftOrder: Shift[] = ["NIGHT", "MORNING", "AFTERNOON"];
+  // Fill the most constrained shifts first: nights, then by display order.
+  const shiftOrder = [...shiftDefs].sort((a, b) => {
+    if (a.isNightLike !== b.isNightLike) return a.isNightLike ? -1 : 1;
+    return a.sortOrder - b.sortOrder;
+  });
 
   for (let d = 0; d < days; d++) {
-    for (const shift of shiftOrder) {
+    for (const shiftDef of shiftOrder) {
+      const shift = shiftDef.code;
       for (const req of coverage.filter((c) => c.shift === shift)) {
         let needed = req.required;
         if (needed <= 0) continue;
@@ -117,46 +126,56 @@ function greedyConstruct(input: SolverInput): Grid {
         const candidates = staff
           .map((st, i) => ({ st, i }))
           .filter(({ st, i }) => {
-            if (st.roleId !== req.roleId) return false;
-            if (grid[i][d] !== "DO") return false; // already assigned today
+            // Must match what the requirement is asking for
+            if (req.roleId && st.roleId !== req.roleId) return false;
+            const tier = st.tierId ? tierById.get(st.tierId) : undefined;
+            if (req.tierId) {
+              if (st.tierId !== req.tierId) return false;
+            } else if (!req.roleId && tier && !tier.countsTowardClinicalCoverage) {
+              return false; // support staff don't fill a plain headcount floor
+            }
+            if (grid[i][d] !== DAY_OFF) return false; // already assigned today
             if (hardOff.has(`${st.id}|${d}`)) return false;
-            if (
-              rules.noMorningAfterNight &&
-              shift === "MORNING" &&
-              d > 0 &&
-              grid[i][d - 1] === "NIGHT"
-            )
-              return false;
+
+            // Tier eligibility for this shift / weekends
+            if (tier) {
+              const rule = tier.shiftRules.find((r) => r.shift === shift);
+              if (rule?.eligible === false) return false;
+              if (isWeekend(startDate, d) && rule?.weekendEligible === false) return false;
+            }
+
+            // Rest since yesterday's shift, from real shift times
+            if (rules.minRestHours !== null && d > 0) {
+              const prev = defByCode.get(grid[i][d - 1]);
+              if (prev && restHoursBetween(prev, shiftDef) < rules.minRestHours) {
+                return false;
+              }
+            }
+
             if (consecutiveDaysEndingBefore(grid[i], d) >= rules.maxConsecutiveDays)
               return false;
-            const tier = st.tierId ? tierById.get(st.tierId) : undefined;
-            if (tier) {
-              const shiftRule = tier.shiftRules.find((r) => r.shift === shift);
-              if (shiftRule?.eligible === false) return false;
-              if (isWeekend(startDate, d) && shiftRule?.weekendEligible === false) return false;
-            }
+
             const maxNights = Math.min(
               rules.maxConsecutiveNights,
               tier?.maxConsecutiveNights ?? Infinity,
             );
-            if (
-              shift === "NIGHT" &&
-              consecutiveNightsEndingBefore(grid[i], d) >= maxNights
-            )
-              return false;
-            if (shift === "NIGHT" && nightsInWeek(grid[i], d) >= rules.maxNightsPerWeek)
-              return false;
+            if (shiftDef.isNightLike) {
+              if (consecutiveNightsEndingBefore(grid[i], d, defByCode) >= maxNights)
+                return false;
+              if (nightsInWeek(grid[i], d, defByCode) >= rules.maxNightsPerWeek)
+                return false;
+            }
             if (daysOffLeftInWeek(grid[i], d, days) <= rules.minDaysOffPerWeek - 1)
               return false;
             return true;
           })
-          .sort((a, b) => score(a.i, shift, d) - score(b.i, shift, d));
+          .sort((a, b) => score(a.i, shiftDef, d) - score(b.i, shiftDef, d));
 
         for (const { i } of candidates) {
           if (needed <= 0) break;
           grid[i][d] = shift;
           totalShifts[i]++;
-          if (shift === "NIGHT") totalNights[i]++;
+          if (shiftDef.isNightLike) totalNights[i]++;
           needed--;
         }
         // If still short here, local search will try to repair it.
@@ -167,12 +186,12 @@ function greedyConstruct(input: SolverInput): Grid {
   return grid;
 
   /** Lower = better candidate. */
-  function score(i: number, shift: Shift, d: number): number {
+  function score(i: number, shiftDef: ShiftDef, d: number): number {
     let s = totalShifts[i] * 2;
-    if (shift === "NIGHT") {
+    if (shiftDef.isNightLike) {
       s += totalNights[i] * 3;
       // Prefer continuing an existing night run (keeps rest patterns sane)
-      if (d > 0 && grid[i][d - 1] === "NIGHT") s -= 4;
+      if (d > 0 && defByCode.get(grid[i][d - 1])?.isNightLike) s -= 4;
     }
     if (softOff.has(`${staff[i].id}|${d}`)) s += 25; // avoid requested days off
     return s + Math.random(); // tie-break randomly
@@ -185,27 +204,35 @@ function consecutiveDaysEndingBefore(row: CellValue[], d: number): number {
   return n;
 }
 
-function consecutiveNightsEndingBefore(row: CellValue[], d: number): number {
+function consecutiveNightsEndingBefore(
+  row: CellValue[],
+  d: number,
+  defByCode: Map<Shift, ShiftDef>,
+): number {
   let n = 0;
-  for (let i = d - 1; i >= 0 && row[i] === "NIGHT"; i--) n++;
+  for (let i = d - 1; i >= 0 && defByCode.get(row[i])?.isNightLike; i--) n++;
   return n;
 }
 
-function nightsInWeek(row: CellValue[], d: number): number {
+function nightsInWeek(
+  row: CellValue[],
+  d: number,
+  defByCode: Map<Shift, ShiftDef>,
+): number {
   const start = Math.floor(d / 7) * 7;
   let n = 0;
-  for (let i = start; i < d; i++) if (row[i] === "NIGHT") n++;
+  for (let i = start; i < d; i++) if (defByCode.get(row[i])?.isNightLike) n++;
   return n;
 }
 
-/** Days still unassigned (DO) in the current 7-day block, including today. */
+/** Days still unassigned (off) in the current 7-day block, excluding today. */
 function daysOffLeftInWeek(row: CellValue[], d: number, days: number): number {
   const start = Math.floor(d / 7) * 7;
   const end = Math.min(start + 7, days);
   let n = 0;
   for (let i = start; i < end; i++) {
     if (i === d) continue; // today is about to be assigned
-    if (row[i] === "DO") n++;
+    if (row[i] === DAY_OFF) n++;
   }
   return n;
 }
@@ -213,5 +240,3 @@ function daysOffLeftInWeek(row: CellValue[], d: number, days: number): number {
 function randInt(n: number): number {
   return Math.floor(Math.random() * n);
 }
-
-export { SHIFTS };

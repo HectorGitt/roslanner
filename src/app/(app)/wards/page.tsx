@@ -7,18 +7,32 @@ import { api } from "@/lib/api";
 interface WardRow {
   id: string;
   name: string;
+  category: string;
+  cycleLengthDays: number;
   _count: { staff: number; rosters: number };
+}
+interface Preset {
+  key: string;
+  category: string;
+  description: string;
+  cycleLengthDays: number;
+  shifts: { code: string; label: string }[];
 }
 
 export default function WardsPage() {
   const [wards, setWards] = useState<WardRow[]>([]);
+  const [presets, setPresets] = useState<Preset[]>([]);
   const [name, setName] = useState("");
+  const [preset, setPreset] = useState("standard");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   const load = () =>
-    api<WardRow[]>("/api/wards")
-      .then(setWards)
+    Promise.all([api<WardRow[]>("/api/wards"), api<Preset[]>("/api/shift-presets")])
+      .then(([w, p]) => {
+        setWards(w);
+        setPresets(p);
+      })
       .finally(() => setLoading(false));
 
   useEffect(() => {
@@ -29,13 +43,15 @@ export default function WardsPage() {
     e.preventDefault();
     setError("");
     try {
-      await api("/api/wards", { method: "POST", body: JSON.stringify({ name }) });
+      await api("/api/wards", { method: "POST", body: JSON.stringify({ name, preset }) });
       setName("");
       load();
     } catch (err) {
       setError((err as Error).message);
     }
   }
+
+  const chosen = presets.find((p) => p.key === preset);
 
   async function deleteWard(id: string, wardName: string) {
     if (!confirm(`Delete ward "${wardName}" and all its staff and rosters?`)) return;
@@ -52,16 +68,35 @@ export default function WardsPage() {
         </p>
       </div>
 
-      <form onSubmit={createWard} className="flex gap-3">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Paediatrics, ICU, Surgical Ward A"
-          className="w-80 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
-        />
-        <button className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700 shadow-sm shadow-teal-600/20 transition-all">
-          Add ward
-        </button>
+      <form onSubmit={createWard} className="space-y-2">
+        <div className="flex flex-wrap gap-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Paediatrics, ICU, Surgical Ward A"
+            className="w-80 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
+          />
+          <select
+            value={preset}
+            onChange={(e) => setPreset(e.target.value)}
+            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-sm text-slate-900 dark:text-white shadow-sm"
+          >
+            {presets.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.category}
+              </option>
+            ))}
+          </select>
+          <button className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700 shadow-sm shadow-teal-600/20 transition-all">
+            Add ward
+          </button>
+        </div>
+        {chosen && (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {chosen.description} — {chosen.shifts.map((s) => s.label).join(", ")} ·{" "}
+            {chosen.cycleLengthDays}-day cycle. All editable afterwards.
+          </p>
+        )}
       </form>
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
@@ -87,6 +122,9 @@ export default function WardsPage() {
               </div>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                 {w._count.staff} staff · {w._count.rosters} roster{w._count.rosters === 1 ? "" : "s"}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">
+                {w.category} · {w.cycleLengthDays}-day cycle
               </p>
               <Link
                 href={`/wards/${w.id}`}

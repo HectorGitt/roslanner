@@ -1,12 +1,21 @@
 import { prisma } from "@/lib/db";
-import { CoverageReq, OffDay, Shift, SolverInput, TierInfo, TierPairing } from "./types";
+import {
+  CoverageReq,
+  OffDay,
+  Rules,
+  Shift,
+  ShiftDef,
+  SolverInput,
+  TierInfo,
+  TierPairing,
+} from "./types";
 
-const DEFAULT_RULES = {
+const DEFAULT_RULES: Rules = {
   maxConsecutiveDays: 6,
   maxNightsPerWeek: 3,
   minDaysOffPerWeek: 1,
-  noMorningAfterNight: true,
   maxConsecutiveNights: 4,
+  minRestHours: 8,
 };
 
 /** Build the solver/validator input for a ward + period from the database. */
@@ -20,22 +29,37 @@ export async function loadSolverInput(
     select: { hospitalId: true },
   });
 
-  const [staff, requirements, ruleSet, tiersRaw, pairingsRaw] = await Promise.all([
-    prisma.staff.findMany({
-      where: { wardId, active: true },
-      include: { role: true, tier: true },
-      orderBy: [{ role: { name: "asc" } }, { name: "asc" }],
-    }),
-    prisma.coverageRequirement.findMany({ where: { wardId } }),
-    prisma.ruleSet.findUnique({ where: { wardId } }),
-    prisma.staffTier.findMany({
-      where: { hospitalId: ward.hospitalId },
-      include: { shiftEligibility: true },
-    }),
-    prisma.tierPairingRule.findMany({
-      where: { dependentTier: { hospitalId: ward.hospitalId } },
-    }),
-  ]);
+  const [staff, requirements, ruleSet, shiftDefsRaw, tiersRaw, pairingsRaw] =
+    await Promise.all([
+      prisma.staff.findMany({
+        where: { wardId, active: true },
+        include: { role: true, tier: true },
+        orderBy: [{ role: { name: "asc" } }, { name: "asc" }],
+      }),
+      prisma.coverageRequirement.findMany({ where: { wardId } }),
+      prisma.ruleSet.findUnique({ where: { wardId } }),
+      prisma.shiftDefinition.findMany({
+        where: { wardId },
+        orderBy: { sortOrder: "asc" },
+      }),
+      prisma.staffTier.findMany({
+        where: { hospitalId: ward.hospitalId },
+        include: { shiftEligibility: true },
+      }),
+      prisma.tierPairingRule.findMany({
+        where: { dependentTier: { hospitalId: ward.hospitalId } },
+      }),
+    ]);
+
+  const shiftDefs: ShiftDef[] = shiftDefsRaw.map((sd) => ({
+    code: sd.code,
+    label: sd.label,
+    startMinutes: sd.startMinutes,
+    endMinutes: sd.endMinutes,
+    crossesMidnight: sd.crossesMidnight,
+    isNightLike: sd.isNightLike,
+    sortOrder: sd.sortOrder,
+  }));
 
   // Tier rules are keyed by shift code, so they apply in every ward that uses
   // that shift — no per-ward resolution needed.
@@ -79,9 +103,17 @@ export async function loadSolverInput(
     }
   }
 
+  // Drop requirements for shifts this ward no longer defines — otherwise they'd
+  // report shortfalls for a shift nobody can be assigned to.
+  const validCodes = new Set(shiftDefs.map((sd) => sd.code));
   const coverage: CoverageReq[] = requirements
-    .filter((r) => r.required > 0)
-    .map((r) => ({ shift: r.shift as Shift, roleId: r.roleId, required: r.required }));
+    .filter((r) => r.required > 0 && validCodes.has(r.shift))
+    .map((r) => ({
+      shift: r.shift as Shift,
+      roleId: r.roleId ?? undefined,
+      tierId: r.tierId ?? undefined,
+      required: r.required,
+    }));
 
   return {
     days,
@@ -101,6 +133,7 @@ export async function loadSolverInput(
     offDays,
     tiers,
     tierPairings,
+    shiftDefs,
   };
 }
 

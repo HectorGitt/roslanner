@@ -1,9 +1,31 @@
-export const SHIFTS = ["MORNING", "AFTERNOON", "NIGHT"] as const;
-export type Shift = (typeof SHIFTS)[number];
+/** The cell value meaning "not working" — the one shift code reserved by the app. */
+export const DAY_OFF = "DO";
 
-/** What a cell in the roster grid can hold. DO = day off. */
-export const CELL_VALUES = ["MORNING", "AFTERNOON", "NIGHT", "DO"] as const;
-export type CellValue = (typeof CELL_VALUES)[number];
+/**
+ * A shift code. Not a fixed union: each ward defines its own vocabulary via
+ * ShiftDefinition (Morning/Afternoon/Night, or Day/Call Duty, or clinic
+ * sessions). Codes are shared across wards that use the same shift.
+ */
+export type Shift = string;
+
+/** What a cell in the roster grid holds: a shift code, or DAY_OFF. */
+export type CellValue = string;
+
+/** The shift vocabulary of the ward being solved, with the times the rules need. */
+export interface ShiftDef {
+  code: Shift;
+  label: string;
+  /** Minutes from midnight. */
+  startMinutes: number;
+  endMinutes: number;
+  crossesMidnight: boolean;
+  /** Counts as a night for consecutive-night and night-fairness rules. */
+  isNightLike: boolean;
+  sortOrder: number;
+}
+
+/** Shift codes the legacy 3-shift model used, for seeding/backfill only. */
+export const LEGACY_SHIFT_CODES = ["MORNING", "AFTERNOON", "NIGHT"] as const;
 
 export interface SolverStaff {
   id: string;
@@ -16,7 +38,7 @@ export interface SolverStaff {
   canBeLead: boolean;
 }
 
-/** Per-shift eligibility for a tier (weekend/holiday flags only apply when eligible=true). */
+/** Per-shift eligibility for a tier (weekend flag only applies when eligible). */
 export interface TierShiftRule {
   shift: Shift;
   eligible: boolean;
@@ -28,7 +50,7 @@ export interface TierInfo {
   id: string;
   name: string;
   countsTowardClinicalCoverage: boolean;
-  /** Overrides the ward's Rules.maxConsecutiveNights for staff in this tier, if set. */
+  /** Tightens the ward's maxConsecutiveNights for this tier when set. */
   maxConsecutiveNights: number | null;
   shiftRules: TierShiftRule[];
 }
@@ -42,9 +64,14 @@ export interface TierPairing {
   shift?: Shift;
 }
 
+/**
+ * Required headcount for one shift, scoped by role and/or tier.
+ * Both undefined = plain headcount for the shift.
+ */
 export interface CoverageReq {
   shift: Shift;
-  roleId: string;
+  roleId?: string;
+  tierId?: string;
   required: number;
 }
 
@@ -52,8 +79,9 @@ export interface Rules {
   maxConsecutiveDays: number;
   maxNightsPerWeek: number;
   minDaysOffPerWeek: number;
-  noMorningAfterNight: boolean;
   maxConsecutiveNights: number;
+  /** Minimum hours between consecutive shifts; null = unenforced. */
+  minRestHours: number | null;
 }
 
 /** A single day a staff member should (hard) or would like to (soft) be off. */
@@ -73,6 +101,8 @@ export interface SolverInput {
   offDays: OffDay[];
   tiers: TierInfo[];
   tierPairings: TierPairing[];
+  /** The ward's shift vocabulary. Empty means nothing can be scheduled. */
+  shiftDefs: ShiftDef[];
 }
 
 /** grid[staffIndex][dayIndex] — staff order matches input.staff. */
@@ -81,7 +111,7 @@ export type Grid = CellValue[][];
 export type ViolationType =
   | "COVERAGE_SHORTFALL"
   | "HARD_LEAVE_BROKEN"
-  | "MORNING_AFTER_NIGHT"
+  | "INSUFFICIENT_REST"
   | "MAX_CONSECUTIVE_DAYS"
   | "MAX_CONSECUTIVE_NIGHTS"
   | "MAX_NIGHTS_PER_WEEK"

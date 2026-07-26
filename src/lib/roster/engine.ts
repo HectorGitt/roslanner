@@ -1,9 +1,10 @@
 import {
   CellValue,
+  DAY_OFF,
   Evaluation,
   Grid,
   Shift,
-  SHIFTS,
+  ShiftDef,
   SolverInput,
   Violation,
 } from "./types";
@@ -13,7 +14,7 @@ const SOFT_WEIGHT = 50;
 const FAIRNESS_WEIGHT = 1;
 
 export function isWorkShift(v: CellValue): v is Shift {
-  return v !== "DO";
+  return v !== DAY_OFF;
 }
 
 /** Day-of-week (0=Sun..6=Sat) for a day index relative to startDate. */
@@ -29,61 +30,87 @@ export function isWeekend(startDate: string, dayIndex: number): boolean {
 }
 
 /**
- * Evaluate a grid against all constraints.
- * Hard violations: coverage shortfall, working on hard leave, rest rules.
- * Soft: unmet DO requests. Fairness: spread of nights/weekends/totals per role.
+ * Hours of rest between a shift worked on one day and a shift worked the next.
+ * Shift times are minutes-from-midnight; a shift flagged crossesMidnight ends
+ * on the following calendar day.
+ */
+export function restHoursBetween(prev: ShiftDef, next: ShiftDef): number {
+  const prevEnd = prev.crossesMidnight ? prev.endMinutes + 24 * 60 : prev.endMinutes;
+  const nextStart = next.startMinutes + 24 * 60; // next calendar day
+  return (nextStart - prevEnd) / 60;
+}
+
+/**
+ * Evaluate a grid against every constraint. Pure and synchronous — the solver
+ * calls it tens of thousands of times, so everything it needs (shift times,
+ * tiers, coverage, leave) must already be on `input`.
  */
 export function evaluate(input: SolverInput, grid: Grid): Evaluation {
   const violations: Violation[] = [];
-  const { days, staff, coverage, rules, offDays, startDate, tiers, tierPairings } = input;
-  const tierById = new Map(tiers.map((t) => [t.id, t]));
+  const {
+    days,
+    staff,
+    coverage,
+    rules,
+    offDays,
+    startDate,
+    tiers,
+    tierPairings,
+    shiftDefs,
+  } = input;
 
-  // --- Coverage per day/shift/role ---
-  // NOTE: StaffTier.countsTowardClinicalCoverage is deliberately NOT applied to
-  // role-based requirements. Role coverage is already role-specific (a porter
-  // never satisfies a "Nurse" requirement), and excluding support staff here
-  // would make an explicit support-role requirement unsatisfiable. The flag
-  // takes effect for tier-scoped coverage requirements.
+  const tierById = new Map(tiers.map((t) => [t.id, t]));
+  const defByCode = new Map(shiftDefs.map((sd) => [sd.code, sd]));
+  const isNight = (v: CellValue) => defByCode.get(v)?.isNightLike ?? false;
+  // Shift codes actually present in this ward, in display order.
+  const shiftCodes = shiftDefs.map((sd) => sd.code);
+  const nightCodes = shiftDefs.filter((sd) => sd.isNightLike).map((sd) => sd.code);
+
+  // --- Coverage per day/shift, scoped by role and/or tier ---
   for (let d = 0; d < days; d++) {
-    const counts = new Map<string, number>(); // `${shift}|${roleId}` -> assigned
-    for (let s = 0; s < staff.length; s++) {
-      const v = grid[s][d];
-      if (isWorkShift(v)) {
-        const key = `${v}|${staff[s].roleId}`;
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-      }
-    }
     for (const req of coverage) {
-      const have = counts.get(`${req.shift}|${req.roleId}`) ?? 0;
+      let have = 0;
+      for (let s = 0; s < staff.length; s++) {
+        if (grid[s][d] !== req.shift) continue;
+        if (req.roleId && staff[s].roleId !== req.roleId) continue;
+        if (req.tierId) {
+          if (staff[s].tierId !== req.tierId) continue;
+        } else if (!req.roleId) {
+          // Plain headcount floor: support tiers are rostered but don't count
+          // toward clinical coverage.
+          const t = staff[s].tierId ? tierById.get(staff[s].tierId!) : undefined;
+          if (t && !t.countsTowardClinicalCoverage) continue;
+        }
+        have++;
+      }
       if (have < req.required) {
         violations.push({
           type: "COVERAGE_SHORTFALL",
           severity: "HARD",
-          message: `Day ${d + 1}: ${req.shift.toLowerCase()} needs ${req.required}, has ${have} (${roleName(input, req.roleId)})`,
+          message: `Day ${d + 1}: ${shiftLabel(input, req.shift)} needs ${req.required} ${scopeLabel(input, req)}, has ${have}`,
           dayIndexes: [d],
         });
       }
     }
 
-    // --- Tier pairing ("Tier 3 must always have >=N Tier 2 present") ---
+    // --- Tier pairing ("an intern is never on shift without a senior") ---
     if (tierPairings.length > 0) {
-      for (const shift of SHIFTS) {
+      for (const shift of shiftCodes) {
         const tierCounts = new Map<string, number>();
         for (let s = 0; s < staff.length; s++) {
-          if (grid[s][d] !== shift || !staff[s].tierId) continue;
-          const tid = staff[s].tierId!;
+          const tid = staff[s].tierId;
+          if (grid[s][d] !== shift || !tid) continue;
           tierCounts.set(tid, (tierCounts.get(tid) ?? 0) + 1);
         }
         for (const p of tierPairings) {
           if (p.shift && p.shift !== shift) continue;
-          const dependentPresent = (tierCounts.get(p.dependentTierId) ?? 0) > 0;
-          if (!dependentPresent) continue;
-          const requiredPresent = tierCounts.get(p.requiredTierId) ?? 0;
-          if (requiredPresent < p.minRequiredCount) {
+          if ((tierCounts.get(p.dependentTierId) ?? 0) === 0) continue;
+          const present = tierCounts.get(p.requiredTierId) ?? 0;
+          if (present < p.minRequiredCount) {
             violations.push({
               type: "TIER_PAIRING_UNMET",
               severity: "HARD",
-              message: `Day ${d + 1}: ${shift.toLowerCase()} has ${tierName(input, p.dependentTierId)} without ${p.minRequiredCount > 1 ? `${p.minRequiredCount}x ` : ""}${tierName(input, p.requiredTierId)} present`,
+              message: `Day ${d + 1}: ${shiftLabel(input, shift)} has ${tierName(input, p.dependentTierId)} without ${p.minRequiredCount > 1 ? `${p.minRequiredCount}x ` : ""}${tierName(input, p.requiredTierId)} present`,
               dayIndexes: [d],
             });
           }
@@ -126,14 +153,20 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
   for (let s = 0; s < staff.length; s++) {
     const row = grid[s];
     const name = staff[s].name;
+    const tier = staff[s].tierId ? tierById.get(staff[s].tierId!) : undefined;
 
-    if (rules.noMorningAfterNight) {
+    // Rest between consecutive days, from each shift's real times.
+    if (rules.minRestHours !== null) {
       for (let d = 1; d < days; d++) {
-        if (row[d - 1] === "NIGHT" && row[d] === "MORNING") {
+        const prev = defByCode.get(row[d - 1]);
+        const next = defByCode.get(row[d]);
+        if (!prev || !next) continue; // a day off resets rest
+        const rest = restHoursBetween(prev, next);
+        if (rest < rules.minRestHours) {
           violations.push({
-            type: "MORNING_AFTER_NIGHT",
+            type: "INSUFFICIENT_REST",
             severity: "HARD",
-            message: `${name}: morning shift straight after a night (day ${d + 1})`,
+            message: `${name}: only ${rest}h rest between ${prev.label} and ${next.label} (day ${d + 1}, min ${rules.minRestHours}h)`,
             staffId: staff[s].id,
             dayIndexes: [d - 1, d],
           });
@@ -141,24 +174,22 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
       }
     }
 
-    // Tier shift eligibility (e.g. Tier 1 = Morning only, never weekends)
-    const tier = staff[s].tierId ? tierById.get(staff[s].tierId!) : undefined;
+    // Tier shift eligibility (e.g. senior staff on mornings only, no weekends)
     if (tier) {
-      const shiftRuleByShift = new Map(tier.shiftRules.map((r) => [r.shift, r]));
+      const ruleFor = new Map(tier.shiftRules.map((r) => [r.shift, r]));
       for (let d = 0; d < days; d++) {
         const v = row[d];
         if (!isWorkShift(v)) continue;
-        const shiftRule = shiftRuleByShift.get(v);
-        const weekend = isWeekend(startDate, d);
+        const shiftRule = ruleFor.get(v);
         if (shiftRule?.eligible === false) {
           violations.push({
             type: "TIER_SHIFT_INELIGIBLE",
             severity: "HARD",
-            message: `${name} (${tier.name}) isn't eligible for ${v.toLowerCase()} shifts (day ${d + 1})`,
+            message: `${name} (${tier.name}) isn't eligible for ${shiftLabel(input, v)} shifts (day ${d + 1})`,
             staffId: staff[s].id,
             dayIndexes: [d],
           });
-        } else if (weekend && shiftRule?.weekendEligible === false) {
+        } else if (isWeekend(startDate, d) && shiftRule?.weekendEligible === false) {
           violations.push({
             type: "TIER_SHIFT_INELIGIBLE",
             severity: "HARD",
@@ -169,7 +200,8 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
         }
       }
     }
-    // A tier override may only tighten the ward's limit, never loosen it.
+
+    // A tier override may only tighten the ward's night limit, never loosen it.
     const effectiveMaxNights = Math.min(
       rules.maxConsecutiveNights,
       tier?.maxConsecutiveNights ?? Infinity,
@@ -180,7 +212,7 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     let nightRun = 0;
     for (let d = 0; d <= days; d++) {
       const working = d < days && isWorkShift(row[d]);
-      const night = d < days && row[d] === "NIGHT";
+      const night = d < days && isNight(row[d]);
       if (working) run++;
       else {
         if (run > rules.maxConsecutiveDays) {
@@ -209,7 +241,7 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
       }
     }
 
-    // Weekly rules on consecutive 7-day blocks from start
+    // Weekly rules on consecutive 7-day blocks from the start of the roster
     for (let w = 0; w * 7 < days; w++) {
       const start = w * 7;
       const end = Math.min(start + 7, days);
@@ -217,8 +249,8 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
       let nights = 0;
       let dos = 0;
       for (let d = start; d < end; d++) {
-        if (row[d] === "NIGHT") nights++;
-        if (row[d] === "DO") dos++;
+        if (isNight(row[d])) nights++;
+        if (row[d] === DAY_OFF) dos++;
       }
       if (nights > rules.maxNightsPerWeek) {
         violations.push({
@@ -249,14 +281,18 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     list.push(i);
     byRole.set(st.roleId, list);
   });
-  // Staff a tier bars from a shift (or from weekends) are excluded from that
-  // fairness pool — otherwise a morning-only senior looks permanently
-  // "short of nights" and the solver burns effort chasing an impossible fix.
-  const shiftEligible = (sIdx: number, shift: Shift): boolean => {
+
+  // Staff a tier bars from nights (or from weekends) are excluded from that
+  // pool — otherwise a morning-only senior looks permanently short of nights
+  // and the solver burns effort chasing an impossible fix.
+  const nightEligible = (sIdx: number): boolean => {
     const tierId = staff[sIdx].tierId;
     const t = tierId ? tierById.get(tierId) : undefined;
     if (!t) return true;
-    return t.shiftRules.find((r) => r.shift === shift)?.eligible ?? true;
+    if (nightCodes.length === 0) return true;
+    return nightCodes.some(
+      (code) => t.shiftRules.find((r) => r.shift === code)?.eligible ?? true,
+    );
   };
   const weekendEligible = (sIdx: number): boolean => {
     const tierId = staff[sIdx].tierId;
@@ -268,10 +304,12 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
   for (const idxs of byRole.values()) {
     if (idxs.length < 2) continue;
 
-    const nightPool = idxs.filter((i) => shiftEligible(i, "NIGHT"));
+    const nightPool = idxs.filter(nightEligible);
     const weekendPool = idxs.filter(weekendEligible);
 
-    const nights = nightPool.map((i) => countIn(grid[i], "NIGHT"));
+    const nights = nightPool.map((i) =>
+      grid[i].reduce((a, v) => a + (isNight(v) ? 1 : 0), 0),
+    );
     const weekends = weekendPool.map((i) =>
       grid[i].reduce(
         (acc, v, d) => acc + (isWorkShift(v) && isWeekend(startDate, d) ? 1 : 0),
@@ -285,7 +323,6 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
       spread(totals) * 2;
 
     const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
-    const meanTotals = mean(totals);
 
     if (nights.length > 1) {
       const meanNights = mean(nights);
@@ -315,6 +352,7 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
         }
       });
     }
+    const meanTotals = mean(totals);
     idxs.forEach((sIdx, localIdx) => {
       if (Math.abs(totals[localIdx] - meanTotals) > 1.5) {
         violations.push({
@@ -342,16 +380,22 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
   };
 }
 
-function roleName(input: SolverInput, roleId: string): string {
-  return input.staff.find((s) => s.roleId === roleId)?.roleName ?? "staff";
+function shiftLabel(input: SolverInput, code: Shift): string {
+  return input.shiftDefs.find((sd) => sd.code === code)?.label ?? code.toLowerCase();
+}
+
+/** Human description of what a coverage requirement is asking for. */
+function scopeLabel(input: SolverInput, req: { roleId?: string; tierId?: string }): string {
+  const role = req.roleId
+    ? input.staff.find((s) => s.roleId === req.roleId)?.roleName
+    : undefined;
+  const tier = req.tierId ? tierName(input, req.tierId) : undefined;
+  if (role && tier) return `${tier} ${role}`;
+  return role ?? tier ?? "staff";
 }
 
 function tierName(input: SolverInput, tierId: string): string {
   return input.tiers.find((t) => t.id === tierId)?.name ?? "tier";
-}
-
-function countIn(row: CellValue[], v: CellValue): number {
-  return row.reduce((a, c) => a + (c === v ? 1 : 0), 0);
 }
 
 /** Sum of absolute deviations from the mean — cheap fairness measure. */
@@ -365,5 +409,3 @@ function range(from: number, to: number): number[] {
   for (let i = Math.max(0, from); i < to; i++) out.push(i);
   return out;
 }
-
-export { SHIFTS };

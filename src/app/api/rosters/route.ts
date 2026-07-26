@@ -25,12 +25,8 @@ export async function POST(req: NextRequest) {
   if (guard.response) return guard.response;
 
   const { wardId, startDate, days } = await req.json();
-  const nDays = Number(days);
-  if (!wardId || !startDate || !nDays || nDays < 1 || nDays > 62) {
-    return NextResponse.json(
-      { error: "wardId, startDate and days (1–62) are required" },
-      { status: 400 },
-    );
+  if (!wardId || !startDate) {
+    return NextResponse.json({ error: "wardId and startDate are required" }, { status: 400 });
   }
 
   const ward = await prisma.ward.findFirst({
@@ -38,9 +34,21 @@ export async function POST(req: NextRequest) {
   });
   if (!ward) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // Default to the ward's own cycle length (7-day weekly, 30-day monthly stretch…).
+  const nDays = days === undefined || days === null ? ward.cycleLengthDays : Number(days);
+  if (!Number.isInteger(nDays) || nDays < 1 || nDays > 62) {
+    return NextResponse.json({ error: "days must be between 1 and 62" }, { status: 400 });
+  }
+
   const start = new Date(startDate + "T00:00:00");
   const input = await loadSolverInput(wardId, start, nDays);
 
+  if (input.shiftDefs.length === 0) {
+    return NextResponse.json(
+      { error: "This ward has no shifts defined — set them up first" },
+      { status: 400 },
+    );
+  }
   if (input.staff.length === 0) {
     return NextResponse.json(
       { error: "This ward has no active staff — add staff first" },

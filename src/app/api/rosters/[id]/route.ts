@@ -4,7 +4,7 @@ import { evaluate } from "@/lib/roster/engine";
 import { loadSolverInput, toISODate } from "@/lib/roster/load";
 import { solve } from "@/lib/roster/solve";
 import { requireHospitalUser } from "@/lib/session";
-import { CellValue, Grid } from "@/lib/roster/types";
+import { CellValue, DAY_OFF, Grid } from "@/lib/roster/types";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -49,7 +49,7 @@ async function buildRosterPayload(id: string) {
 
   const rowOf = new Map(input.staff.map((s, i) => [s.id, i]));
   const grid: Grid = input.staff.map(() =>
-    Array<CellValue>(roster.days).fill("DO"),
+    Array<CellValue>(roster.days).fill(DAY_OFF),
   );
   for (const a of roster.assignments) {
     const row = rowOf.get(a.staffId);
@@ -72,6 +72,7 @@ async function buildRosterPayload(id: string) {
     rules: input.rules,
     tiers: input.tiers,
     tierPairings: input.tierPairings,
+    shiftDefs: input.shiftDefs,
     grid,
     evaluation,
   };

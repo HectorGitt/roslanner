@@ -27,10 +27,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (guard.response) return guard.response;
 
   const { id } = await params;
-  const { name } = await req.json();
+  const { name, category, cycleLengthDays } = await req.json();
+  if (cycleLengthDays !== undefined) {
+    const n = Number(cycleLengthDays);
+    if (!Number.isInteger(n) || n < 1 || n > 62) {
+      return NextResponse.json(
+        { error: "Cycle length must be between 1 and 62 days" },
+        { status: 400 },
+      );
+    }
+  }
   const { count } = await prisma.ward.updateMany({
     where: { id, hospitalId: guard.user.hospitalId },
-    data: { name },
+    data: {
+      ...(name !== undefined ? { name } : {}),
+      ...(category !== undefined ? { category: String(category).trim() || "Standard" } : {}),
+      ...(cycleLengthDays !== undefined ? { cycleLengthDays: Number(cycleLengthDays) } : {}),
+    },
   });
   if (count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ ok: true });

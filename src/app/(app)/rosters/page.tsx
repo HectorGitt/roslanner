@@ -8,6 +8,8 @@ import { api } from "@/lib/api";
 interface WardRow {
   id: string;
   name: string;
+  category: string;
+  cycleLengthDays: number;
 }
 interface RosterRow {
   id: string;
@@ -26,7 +28,8 @@ export default function RostersPage() {
 
   const [wardId, setWardId] = useState("");
   const [startDate, setStartDate] = useState("");
-  const [days, setDays] = useState(14);
+  // Follows the chosen ward's own cycle length until the planner overrides it.
+  const [days, setDays] = useState(7);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
 
@@ -85,7 +88,12 @@ export default function RostersPage() {
           <select
             required
             value={wardId}
-            onChange={(e) => setWardId(e.target.value)}
+            onChange={(e) => {
+              setWardId(e.target.value);
+              // Adopt the ward's own cycle length as the starting period.
+              const w = wards.find((x) => x.id === e.target.value);
+              if (w) setDays(w.cycleLengthDays);
+            }}
             className="w-52 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
           >
             <option value="">Select…</option>

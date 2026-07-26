@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const wardId = req.nextUrl.searchParams.get("wardId") ?? undefined;
   const staff = await prisma.staff.findMany({
     where: { ward: { hospitalId: guard.user.hospitalId, ...(wardId ? { id: wardId } : {}) } },
-    include: { role: true, ward: true },
+    include: { role: true, ward: true, tier: true },
     orderBy: [{ role: { name: "asc" } }, { name: "asc" }],
   });
   return NextResponse.json(staff);
