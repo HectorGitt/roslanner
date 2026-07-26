@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { parseISODate } from "@/lib/dates";
 import { prisma } from "@/lib/db";
 import { requireHospitalUser } from "@/lib/session";
 
@@ -42,8 +43,8 @@ export async function POST(req: NextRequest) {
   const leave = await prisma.leaveRequest.create({
     data: {
       staffId,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
+      startDate: parseISODate(startDate),
+      endDate: parseISODate(endDate),
       type: type === "DAY_OFF_REQUEST" ? "DAY_OFF_REQUEST" : "LEAVE",
       note: note || null,
     },

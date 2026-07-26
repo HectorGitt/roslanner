@@ -1,8 +1,10 @@
+import { addDays, daysBetween, parseISODate, startOfDay, toISODate } from "@/lib/dates";
 import { prisma } from "@/lib/db";
 import {
   CoverageReq,
   ExternalShift,
   OffDay,
+  PriorStats,
   Rules,
   Shift,
   ShiftDef,
@@ -17,6 +19,7 @@ const DEFAULT_RULES: Rules = {
   minDaysOffPerWeek: 1,
   maxConsecutiveNights: 4,
   minRestHours: 8,
+  fairnessWindowDays: 0,
 };
 
 /** Build the solver/validator input for a ward + period from the database. */
@@ -102,7 +105,7 @@ export async function loadSolverInput(
   for (const l of leave) {
     for (let d = 0; d < days; d++) {
       const day = addDays(startDate, d);
-      if (day >= stripTime(l.startDate) && day <= stripTime(l.endDate)) {
+      if (day >= startOfDay(l.startDate) && day <= startOfDay(l.endDate)) {
         offDays.push({
           staffId: l.staffId,
           dayIndex: d,
@@ -137,9 +140,7 @@ export async function loadSolverInput(
 
   const externalShifts: ExternalShift[] = [];
   for (const c of externalCommitments) {
-    const dayIndex = Math.round(
-      (stripTime(c.date).getTime() - stripTime(startDate).getTime()) / 86_400_000,
-    );
+    const dayIndex = daysBetween(startDate, c.date);
     const def = otherDefKey.get(`${c.wardId}|${c.shiftCode}`);
     if (!def) continue; // that ward dropped the shift; nothing to compare times against
     externalShifts.push({
@@ -175,6 +176,27 @@ export async function loadSolverInput(
       required: r.required,
     }));
 
+  const rules = ruleSet ?? DEFAULT_RULES;
+
+  // Public holidays falling inside this period.
+  const holidays = await prisma.publicHoliday.findMany({
+    where: {
+      hospitalId: ward.hospitalId,
+      date: { gte: startOfDay(startDate), lt: periodEnd },
+    },
+  });
+  const publicHolidayDayIndexes = holidays.map((h) => daysBetween(startDate, h.date));
+
+  const priorStats =
+    rules.fairnessWindowDays > 0
+      ? await loadPriorStats(
+          ward.hospitalId,
+          staffIds,
+          startDate,
+          rules.fairnessWindowDays,
+        )
+      : [];
+
   return {
     days,
     startDate: toISODate(startDate),
@@ -189,7 +211,7 @@ export async function loadSolverInput(
       canBeLead: s.canBeLead,
     })),
     coverage,
-    rules: ruleSet ?? DEFAULT_RULES,
+    rules,
     offDays,
     tiers,
     tierPairings,
@@ -197,22 +219,67 @@ export async function loadSolverInput(
     externalShifts,
     homeWardId: wardId,
     floatStaffIds: staff.filter((s) => s.wardId !== wardId).map((s) => s.id),
+    publicHolidayDayIndexes,
+    priorStats,
   };
 }
 
-export function toISODate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+/**
+ * What each person already worked in the `windowDays` before this roster,
+ * from published rosters in every ward. Counting published commitments (rather
+ * than assignments) keeps this consistent with what actually stands, and means
+ * a floater's shifts elsewhere count toward their fair share.
+ *
+ * Reduced to plain per-person totals here so the solver's inner loop never
+ * touches history.
+ */
+async function loadPriorStats(
+  hospitalId: string,
+  staffIds: string[],
+  startDate: Date,
+  windowDays: number,
+): Promise<PriorStats[]> {
+  const windowStart = addDays(startDate, -windowDays);
+  const [commitments, holidays, shiftDefs] = await Promise.all([
+    prisma.staffDailyCommitment.findMany({
+      where: {
+        staffId: { in: staffIds },
+        date: { gte: windowStart, lt: startOfDay(startDate) },
+        roster: { status: "PUBLISHED" },
+      },
+    }),
+    prisma.publicHoliday.findMany({
+      where: { hospitalId, date: { gte: windowStart, lt: startOfDay(startDate) } },
+      select: { date: true },
+    }),
+    prisma.shiftDefinition.findMany({
+      where: { ward: { hospitalId } },
+      select: { wardId: true, code: true, isNightLike: true },
+    }),
+  ]);
+
+  const nightKeys = new Set(
+    shiftDefs.filter((sd) => sd.isNightLike).map((sd) => `${sd.wardId}|${sd.code}`),
+  );
+  const holidayDates = new Set(holidays.map((h) => startOfDay(h.date).getTime()));
+
+  const byStaff = new Map<string, PriorStats>();
+  for (const id of staffIds) {
+    byStaff.set(id, { staffId: id, nights: 0, weekends: 0, holidays: 0, total: 0 });
+  }
+  for (const c of commitments) {
+    const s = byStaff.get(c.staffId);
+    if (!s) continue;
+    s.total++;
+    if (nightKeys.has(`${c.wardId}|${c.shiftCode}`)) s.nights++;
+    const dow = c.date.getDay();
+    if (dow === 0 || dow === 6) s.weekends++;
+    if (holidayDates.has(startOfDay(c.date).getTime())) s.holidays++;
+  }
+  return [...byStaff.values()];
 }
 
-function addDays(d: Date, n: number): Date {
-  const out = stripTime(d);
-  out.setDate(out.getDate() + n);
-  return out;
-}
 
-function stripTime(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
+
+// Calendar-date helpers live in @/lib/dates so every module agrees on UTC.
+export { toISODate };

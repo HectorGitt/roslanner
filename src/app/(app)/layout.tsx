@@ -11,6 +11,7 @@ const NAV = [
   { href: "/roles", label: "Roles" },
   { href: "/tiers", label: "Tiers" },
   { href: "/leave", label: "Leave" },
+  { href: "/holidays", label: "Holidays" },
   { href: "/rosters", label: "Rosters" },
 ];
 

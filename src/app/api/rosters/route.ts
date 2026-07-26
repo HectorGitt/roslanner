@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { parseISODate } from "@/lib/dates";
 import { prisma } from "@/lib/db";
 import { syncRosterCommitments } from "@/lib/roster/commitments";
 import { loadSolverInput } from "@/lib/roster/load";
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "days must be between 1 and 62" }, { status: 400 });
   }
 
-  const start = new Date(startDate + "T00:00:00");
+  const start = parseISODate(startDate);
   const input = await loadSolverInput(wardId, start, nDays);
 
   if (input.shiftDefs.length === 0) {

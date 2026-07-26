@@ -38,6 +38,8 @@ interface RosterPayload {
   homeWardId: string;
   /** Staff on this roster whose home ward is elsewhere. */
   floatStaffIds: string[];
+  publicHolidayDayIndexes: number[];
+  priorStats: SolverInput["priorStats"];
   grid: Grid;
   evaluation: Evaluation;
 }
@@ -75,6 +77,8 @@ export default function RosterPage() {
       externalShifts: data.externalShifts,
       homeWardId: data.homeWardId,
       floatStaffIds: data.floatStaffIds,
+      publicHolidayDayIndexes: data.publicHolidayDayIndexes,
+      priorStats: data.priorStats,
     };
     return evaluate(input, grid);
   }, [data, grid]);
@@ -189,12 +193,14 @@ export default function RosterPage() {
     setData(fresh);
   }
 
+  const holidayDays = new Set(data.publicHolidayDayIndexes);
   const dayHeaders = Array.from({ length: data.days }, (_, d) => {
     const date = new Date(data.startDate + "T00:00:00");
     date.setDate(date.getDate() + d);
     return {
       d,
       weekend: isWeekend(data.startDate, d),
+      holiday: holidayDays.has(d),
       dow: date.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 2),
       num: date.getDate(),
     };
@@ -354,12 +360,22 @@ export default function RosterPage() {
               {dayHeaders.map((h) => (
                 <th
                   key={h.d}
+                  title={h.holiday ? "Public holiday" : undefined}
                   className={`border-b border-slate-200 dark:border-slate-800 px-1 py-2 text-center font-medium ${
-                    h.weekend ? "bg-slate-100 dark:bg-slate-800/50" : "bg-white dark:bg-slate-900"
+                    h.holiday
+                      ? "bg-amber-50 dark:bg-amber-500/10"
+                      : h.weekend
+                        ? "bg-slate-100 dark:bg-slate-800/50"
+                        : "bg-white dark:bg-slate-900"
                   } ${shortDays.has(h.d) ? "text-rose-600 dark:text-rose-400" : "text-slate-600 dark:text-slate-400"}`}
                 >
                   <div>{h.dow}</div>
                   <div className="text-sm">{h.num}</div>
+                  {h.holiday && (
+                    <div className="text-[9px] font-semibold uppercase text-amber-600 dark:text-amber-400">
+                      hol
+                    </div>
+                  )}
                   {shortDays.has(h.d) && <div title="Coverage shortfall">⚠</div>}
                 </th>
               ))}
@@ -466,7 +482,7 @@ function GroupRows({
   group: { roleName: string; rows: { staff: SolverStaff; idx: number }[] };
   days: number;
   grid: Grid;
-  dayHeaders: { d: number; weekend: boolean }[];
+  dayHeaders: { d: number; weekend: boolean; holiday: boolean }[];
   badCells: Set<string>;
   offMap: Map<string, "hard" | "soft">;
   onCycle: (sIdx: number, d: number) => void;

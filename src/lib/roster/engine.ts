@@ -1,9 +1,11 @@
+import { addDays, dayOfWeek as dayOfWeekUTC, parseISODate } from "@/lib/dates";
 import {
   CellValue,
   DAY_OFF,
   Evaluation,
   Grid,
   OffDay,
+  PriorStats,
   Shift,
   SolverInput,
   Violation,
@@ -19,9 +21,7 @@ export function isWorkShift(v: CellValue): v is Shift {
 
 /** Day-of-week (0=Sun..6=Sat) for a day index relative to startDate. */
 export function dayOfWeek(startDate: string, dayIndex: number): number {
-  const d = new Date(startDate + "T00:00:00");
-  d.setDate(d.getDate() + dayIndex);
-  return d.getDay();
+  return dayOfWeekUTC(addDays(parseISODate(startDate), dayIndex));
 }
 
 export function isWeekend(startDate: string, dayIndex: number): boolean {
@@ -61,7 +61,11 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     tierPairings,
     shiftDefs,
     externalShifts,
+    publicHolidayDayIndexes,
+    priorStats,
   } = input;
+  const isHoliday = new Set(publicHolidayDayIndexes);
+  const priorByStaff = new Map(priorStats.map((p) => [p.staffId, p]));
 
   const tierById = new Map(tiers.map((t) => [t.id, t]));
   const defByCode = new Map(shiftDefs.map((sd) => [sd.code, sd]));
@@ -224,6 +228,14 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
             staffId: staff[s].id,
             dayIndexes: [d],
           });
+        } else if (isHoliday.has(d) && shiftRule?.holidayEligible === false) {
+          violations.push({
+            type: "TIER_SHIFT_INELIGIBLE",
+            severity: "HARD",
+            message: `${name} (${tier.name}) isn't eligible to work public holidays (day ${d + 1})`,
+            staffId: staff[s].id,
+            dayIndexes: [d],
+          });
         }
       }
     }
@@ -328,69 +340,101 @@ export function evaluate(input: SolverInput, grid: Grid): Evaluation {
     return t.shiftRules.some((r) => r.eligible && r.weekendEligible);
   };
 
+  const holidayEligible = (sIdx: number): boolean => {
+    const tierId = staff[sIdx].tierId;
+    const t = tierId ? tierById.get(tierId) : undefined;
+    if (!t || t.shiftRules.length === 0) return true;
+    return t.shiftRules.some((r) => r.eligible && r.holidayEligible);
+  };
+
+  /**
+   * Each thing we balance: who it applies to, how much of it someone worked in
+   * this roster, what they already worked in the rolling window, and how much
+   * an uneven share matters. Counts are divided by FTE so a half-time member of
+   * staff is balanced to half the shifts, not the same number.
+   */
+  const METRICS: {
+    label: string;
+    pool: (i: number) => boolean;
+    inPeriod: (i: number) => number;
+    prior: (p: PriorStats) => number;
+    weight: number;
+    tolerance: number;
+  }[] = [
+    {
+      label: "nights",
+      pool: nightEligible,
+      inPeriod: (i) => grid[i].reduce((a, v) => a + (isNight(v) ? 1 : 0), 0),
+      prior: (p) => p.nights,
+      weight: 3,
+      tolerance: 0.8,
+    },
+    {
+      label: "weekend shifts",
+      pool: weekendEligible,
+      inPeriod: (i) =>
+        grid[i].reduce(
+          (a, v, d) => a + (isWorkShift(v) && isWeekend(startDate, d) ? 1 : 0),
+          0,
+        ),
+      prior: (p) => p.weekends,
+      weight: 2,
+      tolerance: 0.8,
+    },
+    {
+      label: "public holidays",
+      pool: holidayEligible,
+      inPeriod: (i) =>
+        grid[i].reduce((a, v, d) => a + (isWorkShift(v) && isHoliday.has(d) ? 1 : 0), 0),
+      prior: (p) => p.holidays,
+      weight: 4, // holidays are scarce and keenly felt, so weigh them highest
+      tolerance: 0.5,
+    },
+    {
+      label: "total shifts",
+      pool: () => true,
+      inPeriod: (i) => grid[i].filter(isWorkShift).length,
+      prior: (p) => p.total,
+      weight: 2,
+      tolerance: 1.5,
+    },
+  ];
+
   for (const idxs of byRole.values()) {
     if (idxs.length < 2) continue;
 
-    const nightPool = idxs.filter(nightEligible);
-    const weekendPool = idxs.filter(weekendEligible);
+    for (const metric of METRICS) {
+      const pool = idxs.filter(metric.pool);
+      if (pool.length < 2) continue;
 
-    const nights = nightPool.map((i) =>
-      grid[i].reduce((a, v) => a + (isNight(v) ? 1 : 0), 0),
-    );
-    const weekends = weekendPool.map((i) =>
-      grid[i].reduce(
-        (acc, v, d) => acc + (isWorkShift(v) && isWeekend(startDate, d) ? 1 : 0),
-        0,
-      ),
-    );
-    const totals = idxs.map((i) => grid[i].filter(isWorkShift).length);
-    fairnessCost +=
-      (nights.length > 1 ? spread(nights) * 3 : 0) +
-      (weekends.length > 1 ? spread(weekends) * 2 : 0) +
-      spread(totals) * 2;
-
-    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
-
-    if (nights.length > 1) {
-      const meanNights = mean(nights);
-      nightPool.forEach((sIdx, localIdx) => {
-        if (Math.abs(nights[localIdx] - meanNights) > 0.8) {
-          violations.push({
-            type: "UNFAIR_SHARE",
-            severity: "SOFT",
-            message: `${staff[sIdx].name}: ${nights[localIdx]} nights (average ${meanNights.toFixed(1)})`,
-            staffId: staff[sIdx].id,
-            dayIndexes: [],
-          });
-        }
+      // Nothing to balance if nobody in the pool has any of this.
+      const raw = pool.map((i) => {
+        const prior = priorByStaff.get(staff[i].id);
+        return metric.inPeriod(i) + (prior ? metric.prior(prior) : 0);
       });
-    }
-    if (weekends.length > 1) {
-      const meanWeekends = mean(weekends);
-      weekendPool.forEach((sIdx, localIdx) => {
-        if (Math.abs(weekends[localIdx] - meanWeekends) > 0.8) {
-          violations.push({
-            type: "UNFAIR_SHARE",
-            severity: "SOFT",
-            message: `${staff[sIdx].name}: ${weekends[localIdx]} weekend shifts (average ${meanWeekends.toFixed(1)})`,
-            staffId: staff[sIdx].id,
-            dayIndexes: [],
-          });
-        }
-      });
-    }
-    const meanTotals = mean(totals);
-    idxs.forEach((sIdx, localIdx) => {
-      if (Math.abs(totals[localIdx] - meanTotals) > 1.5) {
+      if (raw.every((n) => n === 0)) continue;
+
+      const rates = pool.map((i, k) => raw[k] / Math.max(staff[i].fte, 0.01));
+      const meanRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+      fairnessCost += spread(rates) * metric.weight;
+
+      pool.forEach((sIdx, k) => {
+        if (Math.abs(rates[k] - meanRate) <= metric.tolerance) return;
+        const fte = staff[sIdx].fte;
+        const perFte = fte === 1 ? "" : ` at ${fte} FTE`;
+        const window =
+          priorByStaff.size > 0 && rules.fairnessWindowDays > 0
+            ? ` over the last ${rules.fairnessWindowDays} days`
+            : "";
         violations.push({
           type: "UNFAIR_SHARE",
           severity: "SOFT",
-          message: `${staff[sIdx].name}: ${totals[localIdx]} total shifts (average ${meanTotals.toFixed(1)})`,
+          message: `${staff[sIdx].name}: ${raw[k]} ${metric.label}${perFte}${window} (average ${meanRate.toFixed(1)})`,
           staffId: staff[sIdx].id,
           dayIndexes: [],
         });
-      }
-    });
+      });
+    }
   }
 
   const hardCount = violations.filter((v) => v.severity === "HARD").length;

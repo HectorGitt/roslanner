@@ -94,8 +94,15 @@ Nothing about the shift model is hardcoded — each hospital configures its own.
   checked against other wards' published rosters.
 - **Leave**: approved leave is a hard constraint; day-off requests are honoured
   when possible (soft).
-- **Fairness**: nights, weekend shifts and total shifts are balanced across staff
-  of the same role, comparing only staff eligible for that kind of shift.
+- **Public holidays** (per hospital): recorded per year and grouped by name, so
+  they can be treated apart from ordinary days — a tier can be kept off them, and
+  who worked them is balanced over years rather than within one roster.
+- **Fairness**: nights, weekend shifts, public holidays and total shifts are
+  balanced across staff of the same role, comparing only staff eligible for that
+  kind of shift, and per FTE so a half-time member of staff is balanced to half
+  the load. Set a **fairness window** on a ward to fold in what people already
+  worked in published rosters, so shares even out across periods instead of
+  resetting every time.
 
 ### Solver
 

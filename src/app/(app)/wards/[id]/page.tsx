@@ -49,6 +49,7 @@ interface Rules {
   minDaysOffPerWeek: number;
   maxConsecutiveNights: number;
   minRestHours: number | null;
+  fairnessWindowDays: number;
 }
 interface Ward {
   id: string;
@@ -68,6 +69,7 @@ const DEFAULT_RULES: Rules = {
   minDaysOffPerWeek: 1,
   maxConsecutiveNights: 4,
   minRestHours: 8,
+  fairnessWindowDays: 0,
 };
 
 type Tab = "staff" | "shifts" | "coverage" | "rules";
@@ -675,6 +677,29 @@ function RulesTab({ ward, onSaved }: { ward: Ward; onSaved: () => void }) {
           Computed from each shift&apos;s actual times, so it catches any
           too-quick turnaround — not just a morning after a night. Leave blank to
           disable.
+        </span>
+      </label>
+      <label className="block">
+        <span className="text-sm font-medium text-slate-900 dark:text-white">
+          Balance fairness over
+        </span>
+        <div className="mt-1.5 flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            max={365}
+            value={rules.fairnessWindowDays}
+            onChange={(e) =>
+              setRules((r) => ({ ...r, fairnessWindowDays: Number(e.target.value) }))
+            }
+            className="w-28 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
+          />
+          <span className="text-sm text-slate-500 dark:text-slate-400">days of history</span>
+        </div>
+        <span className="mt-1.5 block text-xs text-slate-500 dark:text-slate-400">
+          Counts nights, weekends and holidays already worked in published rosters, so
+          shares even out across periods instead of resetting each time. 0 judges each
+          roster on its own.
         </span>
       </label>
       <button

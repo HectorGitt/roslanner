@@ -72,11 +72,14 @@ export async function PUT(req: NextRequest) {
           shiftCode: string;
           eligible: boolean;
           weekendEligible: boolean;
+          holidayEligible?: boolean;
         }) => ({
           tierId: i.tierId,
           shiftCode: i.shiftCode,
           eligible: i.eligible,
           weekendEligible: i.weekendEligible,
+          // Absent means unrestricted, matching how a missing row behaves.
+          holidayEligible: i.holidayEligible ?? true,
         }),
       ),
     }),

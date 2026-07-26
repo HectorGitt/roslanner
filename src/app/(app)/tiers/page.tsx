@@ -27,6 +27,7 @@ interface EligibilityRow {
   shiftCode: string;
   eligible: boolean;
   weekendEligible: boolean;
+  holidayEligible: boolean;
 }
 
 export default function TiersPage() {
@@ -301,6 +302,12 @@ export default function TiersPage() {
   );
 }
 
+interface EligibilityFlags {
+  eligible: boolean;
+  weekendEligible: boolean;
+  holidayEligible: boolean;
+}
+
 function EligibilityMatrix({
   tiers,
   shifts,
@@ -314,13 +321,14 @@ function EligibilityMatrix({
 }) {
   // A missing row means "eligible" — the engine only restricts where a row says otherwise.
   const [rows, setRows] = useState<
-    Record<string, { eligible: boolean; weekendEligible: boolean }>
+    Record<string, EligibilityFlags>
   >(() => {
-    const map: Record<string, { eligible: boolean; weekendEligible: boolean }> = {};
+    const map: Record<string, EligibilityFlags> = {};
     for (const e of eligibility) {
       map[`${e.tierId}|${e.shiftCode}`] = {
         eligible: e.eligible,
         weekendEligible: e.weekendEligible,
+        holidayEligible: e.holidayEligible,
       };
     }
     return map;
@@ -328,12 +336,13 @@ function EligibilityMatrix({
   const [saving, setSaving] = useState(false);
 
   const get = (tierId: string, code: string) =>
-    rows[`${tierId}|${code}`] ?? { eligible: true, weekendEligible: true };
+    rows[`${tierId}|${code}`] ??
+    { eligible: true, weekendEligible: true, holidayEligible: true };
 
   const set = (
     tierId: string,
     code: string,
-    patch: Partial<{ eligible: boolean; weekendEligible: boolean }>,
+    patch: Partial<EligibilityFlags>,
   ) =>
     setRows((r) => ({
       ...r,
@@ -358,8 +367,10 @@ function EligibilityMatrix({
         </h2>
         <p className="text-sm text-slate-500 dark:text-slate-400">
           Which shifts each tier may work. Uncheck a shift to bar the tier from it (e.g.
-          senior staff on mornings only); uncheck <span className="font-medium">Weekends</span>{" "}
-          to keep a tier off weekend duty entirely.
+          senior staff on mornings only); uncheck{" "}
+          <span className="font-medium">Weekends</span> or{" "}
+          <span className="font-medium">Holidays</span> to keep a tier off those days
+          entirely.
         </p>
       </div>
       <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
@@ -373,6 +384,7 @@ function EligibilityMatrix({
                 </th>
               ))}
               <th className="px-5 py-3 font-medium">Weekends</th>
+              <th className="px-5 py-3 font-medium">Holidays</th>
             </tr>
           </thead>
           <tbody>
@@ -401,6 +413,18 @@ function EligibilityMatrix({
                     onChange={(e) =>
                       shifts.forEach((s) =>
                         set(t.id, s.code, { weekendEligible: e.target.checked }),
+                      )
+                    }
+                    className="h-4 w-4 accent-teal-600"
+                  />
+                </td>
+                <td className="px-5 py-3">
+                  <input
+                    type="checkbox"
+                    checked={shifts.every((s) => get(t.id, s.code).holidayEligible)}
+                    onChange={(e) =>
+                      shifts.forEach((s) =>
+                        set(t.id, s.code, { holidayEligible: e.target.checked }),
                       )
                     }
                     className="h-4 w-4 accent-teal-600"

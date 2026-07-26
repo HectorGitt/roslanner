@@ -1,3 +1,4 @@
+import { addDays } from "@/lib/dates";
 import { prisma } from "@/lib/db";
 import { DAY_OFF } from "./types";
 
@@ -52,11 +53,4 @@ export async function syncRosterCommitments(rosterId: string): Promise<{ skipped
       : { count: 0 };
 
   return { skipped: rows.length - created.count };
-}
-
-/** Midnight on the given calendar date, `n` days after `from`. */
-export function addDays(from: Date, n: number): Date {
-  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-  d.setDate(d.getDate() + n);
-  return d;
 }

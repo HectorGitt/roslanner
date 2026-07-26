@@ -99,6 +99,10 @@ function greedyConstruct(input: SolverInput): Grid {
   const grid: Grid = staff.map(() => Array<CellValue>(days).fill(DAY_OFF));
   const tierById = new Map(tiers.map((t) => [t.id, t]));
   const defByCode = new Map(shiftDefs.map((sd) => [sd.code, sd]));
+  const holidayDays = new Set(input.publicHolidayDayIndexes);
+  // Spread scarce days (nights, weekends, holidays) using what people already
+  // worked in the rolling window, so a fresh roster doesn't undo past balancing.
+  const priorByStaff = new Map(input.priorStats.map((p) => [p.staffId, p]));
 
   const hardOff = new Set<string>();
   const softOff = new Set<string>();
@@ -141,11 +145,12 @@ function greedyConstruct(input: SolverInput): Grid {
             if (grid[i][d] !== DAY_OFF) return false; // already assigned today
             if (hardOff.has(`${st.id}|${d}`)) return false;
 
-            // Tier eligibility for this shift / weekends
+            // Tier eligibility for this shift / weekends / public holidays
             if (tier) {
               const rule = tier.shiftRules.find((r) => r.shift === shift);
               if (rule?.eligible === false) return false;
               if (isWeekend(startDate, d) && rule?.weekendEligible === false) return false;
+              if (holidayDays.has(d) && rule?.holidayEligible === false) return false;
             }
 
             // Rest since yesterday's shift — here or in another ward
@@ -193,12 +198,17 @@ function greedyConstruct(input: SolverInput): Grid {
 
   /** Lower = better candidate. */
   function score(i: number, shiftDef: ShiftDef, d: number): number {
-    let s = totalShifts[i] * 2;
+    const prior = priorByStaff.get(staff[i].id);
+    // Per-FTE load, so part-timers aren't asked for a full-timer's share.
+    const fte = Math.max(staff[i].fte, 0.01);
+    let s = ((totalShifts[i] + (prior?.total ?? 0)) / fte) * 2;
     if (shiftDef.isNightLike) {
-      s += totalNights[i] * 3;
+      s += ((totalNights[i] + (prior?.nights ?? 0)) / fte) * 3;
       // Prefer continuing an existing night run (keeps rest patterns sane)
       if (d > 0 && defByCode.get(grid[i][d - 1])?.isNightLike) s -= 4;
     }
+    if (isWeekend(startDate, d)) s += ((prior?.weekends ?? 0) / fte) * 2;
+    if (holidayDays.has(d)) s += ((prior?.holidays ?? 0) / fte) * 4;
     if (softOff.has(`${staff[i].id}|${d}`)) s += 25; // avoid requested days off
     return s + Math.random(); // tie-break randomly
   }

@@ -27,6 +27,7 @@ export const config = {
     "/roles/:path*",
     "/tiers/:path*",
     "/leave/:path*",
+    "/holidays/:path*",
     "/rosters/:path*",
     "/settings/:path*",
     "/onboarding",

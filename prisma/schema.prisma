@@ -10,14 +10,30 @@ datasource db {
 // ===== Tenancy & auth =====
 
 model Hospital {
-  id         String      @id @default(cuid())
+  id         String          @id @default(cuid())
   name       String
-  inviteCode String      @unique
+  inviteCode String          @unique
   users      User[]
   wards      Ward[]
   roles      Role[]
   tiers      StaffTier[]
-  createdAt  DateTime    @default(now())
+  holidays   PublicHoliday[]
+  createdAt  DateTime        @default(now())
+}
+
+/// Public holidays, so they can be treated separately from ordinary days:
+/// senior tiers can be kept off them, and working them is balanced over years.
+model PublicHoliday {
+  id         String   @id @default(cuid())
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  date       DateTime
+  name       String
+  /// Groups recurring instances across years ("CHRISTMAS"), so "who worked it
+  /// last year" can be answered without matching on date.
+  groupKey   String
+
+  @@unique([hospitalId, date])
 }
 
 // Better Auth managed models (user/session/account/verification)
@@ -283,6 +299,10 @@ model RuleSet {
   /// noMorningAfterNight boolean, which couldn't express the 11–12h rest
   /// requirement or cope with wards whose shifts aren't 8/16/22. Null = unenforced.
   minRestHours         Int?   @default(8)
+  /// Days of published history to fold into fairness, so nights/weekends/holidays
+  /// are balanced over a rolling window rather than resetting each roster.
+  /// 0 = judge each roster on its own (the original behaviour).
+  fairnessWindowDays   Int    @default(0)
 }
 
 // type: "LEAVE" (hard — must be off) | "DAY_OFF_REQUEST" (soft preference)

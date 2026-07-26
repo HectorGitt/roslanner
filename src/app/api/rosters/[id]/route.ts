@@ -77,6 +77,8 @@ async function buildRosterPayload(id: string) {
     externalShifts: input.externalShifts,
     homeWardId: input.homeWardId,
     floatStaffIds: input.floatStaffIds,
+    publicHolidayDayIndexes: input.publicHolidayDayIndexes,
+    priorStats: input.priorStats,
     grid,
     evaluation,
   };

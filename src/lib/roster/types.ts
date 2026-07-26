@@ -82,6 +82,21 @@ export interface Rules {
   maxConsecutiveNights: number;
   /** Minimum hours between consecutive shifts; null = unenforced. */
   minRestHours: number | null;
+  /** Days of published history folded into fairness; 0 = this roster only. */
+  fairnessWindowDays: number;
+}
+
+/**
+ * What each person already worked in the rolling window before this roster,
+ * counted from published rosters across every ward. Pre-aggregated in the
+ * loading layer so evaluate() stays pure arithmetic over plain numbers.
+ */
+export interface PriorStats {
+  staffId: string;
+  nights: number;
+  weekends: number;
+  holidays: number;
+  total: number;
 }
 
 /** A single day a staff member should (hard) or would like to (soft) be off. */
@@ -129,6 +144,10 @@ export interface SolverInput {
   homeWardId: string;
   /** Staff in this roster whose home ward is elsewhere (float pool). */
   floatStaffIds: string[];
+  /** Day indexes in this period that fall on a public holiday. */
+  publicHolidayDayIndexes: number[];
+  /** Rolling-window history; empty when fairnessWindowDays is 0. */
+  priorStats: PriorStats[];
 }
 
 /** grid[staffIndex][dayIndex] — staff order matches input.staff. */

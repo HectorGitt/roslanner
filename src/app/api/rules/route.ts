@@ -32,6 +32,7 @@ export async function PUT(req: NextRequest) {
     maxConsecutiveNights: Number(data.maxConsecutiveNights),
     minRestHours:
       data.minRestHours === null || data.minRestHours === "" ? null : Number(data.minRestHours),
+    fairnessWindowDays: Math.max(0, Number(data.fairnessWindowDays) || 0),
   };
   const rules = await prisma.ruleSet.upsert({
     where: { wardId },
