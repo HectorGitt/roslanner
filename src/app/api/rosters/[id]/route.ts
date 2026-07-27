@@ -31,8 +31,11 @@ async function buildRosterPayload(id: string) {
     ...new Set(roster.assignments.map((a) => a.staffId).filter((sid) => !staffIds.includes(sid))),
   ];
   if (extraIds.length > 0) {
+    // Scoped to the hospital as well as the ids: this is the path that would
+    // read another hospital's staff back out if a foreign id ever reached the
+    // assignments table.
     const extras = await prisma.staff.findMany({
-      where: { id: { in: extraIds } },
+      where: { id: { in: extraIds }, ward: { hospitalId: roster.ward.hospitalId } },
       include: { role: true, tier: true },
     });
     for (const e of extras) {
@@ -118,21 +121,62 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json();
   let assignmentsChanged = false;
 
-  if (Array.isArray(body.edits)) {
-    assignmentsChanged = body.edits.length > 0;
-    for (const e of body.edits) {
-      await prisma.assignment.upsert({
+  if (Array.isArray(body.edits) && body.edits.length > 0) {
+    // Everything in an edit is attacker-controllable, and none of it was
+    // checked. Owning the roster is not enough: a staffId from another hospital
+    // would be written happily, and then read back out through the payload.
+    const [eligible, shiftDefs] = await Promise.all([
+      prisma.staff.findMany({
         where: {
-          rosterId_staffId_dayIndex: {
-            rosterId: id,
-            staffId: e.staffId,
-            dayIndex: e.dayIndex,
-          },
+          ward: { hospitalId: guard.user.hospitalId },
+          OR: [{ wardId: roster.wardId }, { floatWards: { some: { wardId: roster.wardId } } }],
         },
-        create: { rosterId: id, staffId: e.staffId, dayIndex: e.dayIndex, shift: e.shift },
-        update: { shift: e.shift },
-      });
+        select: { id: true },
+      }),
+      prisma.shiftDefinition.findMany({
+        where: { wardId: roster.wardId },
+        select: { code: true },
+      }),
+    ]);
+    const allowedStaff = new Set(eligible.map((s) => s.id));
+    // A shift the ward doesn't define would silently escape the night, rest and
+    // hours rules, all of which look the shift up by code.
+    const allowedShifts = new Set([...shiftDefs.map((s) => s.code), DAY_OFF]);
+
+    for (const e of body.edits) {
+      if (!allowedStaff.has(e.staffId)) {
+        return NextResponse.json(
+          { error: "That person can't be rostered on this ward" },
+          { status: 400 },
+        );
+      }
+      if (!Number.isInteger(e.dayIndex) || e.dayIndex < 0 || e.dayIndex >= roster.days) {
+        return NextResponse.json({ error: "Day is outside this roster" }, { status: 400 });
+      }
+      if (!allowedShifts.has(e.shift)) {
+        return NextResponse.json(
+          { error: `"${e.shift}" isn't a shift on this ward` },
+          { status: 400 },
+        );
+      }
     }
+
+    assignmentsChanged = true;
+    await prisma.$transaction(
+      body.edits.map((e: { staffId: string; dayIndex: number; shift: string }) =>
+        prisma.assignment.upsert({
+          where: {
+            rosterId_staffId_dayIndex: {
+              rosterId: id,
+              staffId: e.staffId,
+              dayIndex: e.dayIndex,
+            },
+          },
+          create: { rosterId: id, staffId: e.staffId, dayIndex: e.dayIndex, shift: e.shift },
+          update: { shift: e.shift },
+        }),
+      ),
+    );
   }
   if (body.reoptimize) {
     const input = await loadSolverInput(roster.wardId, roster.startDate, roster.days);

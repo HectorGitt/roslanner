@@ -1,7 +1,12 @@
 # Known issues and open decisions
 
 Running list of things found while building, deliberately deferred, or needing a
-call from the product side. Newest sections first within each group.
+call from the product side.
+
+A full four-part audit (security, engine correctness, data integrity, frontend)
+was run in July 2026 — see [audit-2026-07.md](audit-2026-07.md). It supersedes
+this file for anything it covers; the items below are the ones it did not, plus
+the standing product decisions.
 
 ## Deployment
 
