@@ -361,6 +361,40 @@ async function main() {
   });
   console.log(`Holidays: ${HOLIDAYS.map(([d, n]) => `${d.toISOString().slice(0, 10)} ${n}`).join(", ")}`);
 
+  // ---- Who can be put in charge of a shift -------------------------------
+  // Seniors and core clinical staff lead; interns and support staff don't.
+  const leadTiers = [tierByName["Senior Executive"].id, core.id];
+  const cleared = await prisma.staff.updateMany({
+    where: { ward: { hospitalId }, tierId: { notIn: leadTiers } },
+    data: { canBeLead: false },
+  });
+  const leaders = await prisma.staff.updateMany({
+    where: { ward: { hospitalId }, tierId: { in: leadTiers } },
+    data: { canBeLead: true },
+  });
+  console.log(`Able to lead: ${leaders.count} senior/core staff (${cleared.count} others cannot)`);
+
+  // ---- Rules that carry their own setting --------------------------------
+  await prisma.wardRule.deleteMany({ where: { ward: { hospitalId } } });
+  await prisma.wardRule.create({
+    data: { wardId: general.id, type: "CHARGE_LEAD_REQUIRED", params: {} },
+  });
+  await prisma.wardRule.create({
+    data: { wardId: general.id, type: "MAX_HOURS_PER_WEEK", params: { hours: 48 } },
+  });
+  if (ae) {
+    // Call duty runs in blocks, so a stretch of nights earns the same time off.
+    await prisma.wardRule.create({
+      data: {
+        wardId: ae.id,
+        type: "BLOCK_PATTERN_ON_OFF",
+        params: { blockDays: 7 },
+        tierId: core.id,
+      },
+    });
+  }
+  console.log("Ward rules: General needs a lead per shift and caps 48h/week; A&E has a 7-night block pattern");
+
   // ---- Balance fairness over the last month ------------------------------
   await prisma.ruleSet.update({
     where: { wardId: general.id },

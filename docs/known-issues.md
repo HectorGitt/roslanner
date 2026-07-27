@@ -29,12 +29,18 @@ staging copy, so a local script writing to `DATABASE_URL` writes to production.
 ## Solver
 
 **The greedy pass can leave the final day of a period short.** It fills day by
-day and drives staff toward their consecutive-day limit, so on a tight ward the
-last day has nobody eligible left. Local search usually repairs it but not
-always inside its 2s budget — General Ward needed a second attempt to cover a
-Sunday. Re-optimising is the current workaround; a real fix would make
-construction aware of remaining demand against remaining capacity, or process
-days in an order that doesn't starve the end.
+day and drives staff toward their limits, so on a tight ward the last day has
+nobody eligible left. Local search often repairs it but not reliably inside its
+2s budget: the demo General Ward, which carries the most rules (a seniority
+floor, a lead per shift and a 48h weekly cap), still shows two or three gaps on
+its last day after several re-optimise attempts, while the other three wards
+solve cleanly.
+
+Biasing the greedy toward staff with slack left in the week was tried and made no
+difference, so it was reverted rather than left in unexplained. A real fix needs
+construction to weigh remaining demand against remaining capacity — reserving
+people for later days — or to fill the period in an order that doesn't starve the
+end. Re-optimising is the workaround in the meantime.
 
 **Violation weighting is a policy default, not a fact.** Breaches of a person's
 entitlements (approved leave, tier eligibility, already working another ward)
@@ -47,13 +53,14 @@ The rule now computes real rest from shift times, so setting 11–12h (as the SR
 asks) flags turnarounds the old morning-after-night boolean never checked, e.g.
 an afternoon finishing 22:00 before a morning starting 08:00.
 
-## Modelling
+**Swaps are driven by the planner, not by staff.** `Staff` records aren't linked
+to `User` accounts, so nobody but a hospital admin can sign in. The swap state
+machine is the real two-party handshake — offer, accept with a rule check, then
+approval — but today one person drives all three steps on others' behalf. Letting
+nurses raise and accept their own swaps needs Staff↔User linking and a staff-facing
+permission level.
 
-**Coverage cannot vary by day of week or on public holidays.** A requirement
-applies to every day of the roster, so an outpatient clinic that closes at
-weekends, a ward with lighter weekend cover, or skeleton holiday staffing can't
-be expressed. Worked around in the demo data by staffing the clinic for seven
-days.
+## Modelling
 
 **Draft rosters in different wards can double-book the same person.** Only
 published rosters hold commitments, so a clash between two drafts surfaces when

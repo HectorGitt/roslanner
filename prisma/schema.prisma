@@ -372,7 +372,47 @@ model Roster {
   assignments Assignment[]
   commitments StaffDailyCommitment[]
   chargeLeads ChargeLeadAssignment[]
+  swapRequests SwapRequest[]
   createdAt   DateTime               @default(now())
+}
+
+/// A proposed exchange of two assignments, and where it has got to.
+///
+/// Nothing here re-implements the rules: accepting and approving both run the
+/// ordinary evaluate() over the grid the swap would produce, and compare it with
+/// the grid as it stands. A swap that would introduce a hard violation is
+/// rejected with the evaluation recorded, so the reason survives.
+model SwapRequest {
+  id       String     @id @default(cuid())
+  rosterId String
+  roster   Roster     @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  /// The shift being offered.
+  requestingAssignmentId String
+  requestingAssignment   Assignment @relation("SwapOffered", fields: [requestingAssignmentId], references: [id], onDelete: Cascade)
+  /// The shift offered in exchange — set when the other party accepts.
+  acceptingAssignmentId  String?
+  acceptingAssignment    Assignment? @relation("SwapAccepted", fields: [acceptingAssignmentId], references: [id], onDelete: Cascade)
+  status   SwapStatus @default(PENDING_ACCEPT)
+  /// The evaluation of the proposed grid at the moment it was accepted, so a
+  /// rejection can explain itself later.
+  proposedEvaluation Json?
+  note     String?
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  createdAt        DateTime  @default(now())
+}
+
+enum SwapStatus {
+  /// Waiting for someone to offer a shift in exchange.
+  PENDING_ACCEPT
+  /// Accepted and rule-checked; waiting on the head of unit.
+  PENDING_APPROVAL
+  /// Would have broken a hard rule, so it never reached approval.
+  HARD_RULE_REJECTED
+  /// Turned down by the head of unit.
+  DECLINED
+  APPROVED
+  CANCELLED
 }
 
 /// The one person in charge of a given shift. A side table rather than a flag on
@@ -403,6 +443,8 @@ model Assignment {
   shift      String
   commitment StaffDailyCommitment?
   chargeLead ChargeLeadAssignment?
+  swapsOffered  SwapRequest[] @relation("SwapOffered")
+  swapsAccepted SwapRequest[] @relation("SwapAccepted")
 
   @@unique([rosterId, staffId, dayIndex])
 }

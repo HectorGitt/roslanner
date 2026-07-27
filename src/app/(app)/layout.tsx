@@ -13,6 +13,7 @@ const NAV = [
   { href: "/leave", label: "Leave" },
   { href: "/holidays", label: "Holidays" },
   { href: "/rosters", label: "Rosters" },
+  { href: "/swaps", label: "Swaps" },
 ];
 
 export default function AppLayout({

@@ -29,6 +29,7 @@ export const config = {
     "/leave/:path*",
     "/holidays/:path*",
     "/rosters/:path*",
+    "/swaps/:path*",
     "/settings/:path*",
     "/onboarding",
     "/login",
