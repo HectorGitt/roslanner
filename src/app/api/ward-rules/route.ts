@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireHospitalUser } from "@/lib/session";
+import { resolveGroupScope } from "@/lib/group-scope";
 
 /**
  * Rules that carry their own parameters, as opposed to the fixed numeric limits
@@ -24,8 +25,14 @@ export async function GET(req: NextRequest) {
   const wardId = req.nextUrl.searchParams.get("wardId");
   if (!wardId) return NextResponse.json({ error: "wardId required" }, { status: 400 });
 
+  const scope = await resolveGroupScope(
+    req.nextUrl.searchParams.get("groupId"),
+    guard.user.hospitalId,
+  );
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: 400 });
+
   const items = await prisma.wardRule.findMany({
-    where: { wardId, ward: { hospitalId: guard.user.hospitalId } },
+    where: { wardId, groupId: scope.groupId, ward: { hospitalId: guard.user.hospitalId } },
     include: { tier: { select: { id: true, name: true } } },
     orderBy: { createdAt: "asc" },
   });
@@ -37,7 +44,7 @@ export async function POST(req: NextRequest) {
   const guard = await requireHospitalUser();
   if (guard.response) return guard.response;
 
-  const { wardId, type, params, tierId, shiftCode } = await req.json();
+  const { wardId, groupId, type, params, tierId, shiftCode } = await req.json();
   if (!wardId || !RULE_TYPES.includes(type)) {
     return NextResponse.json({ error: "wardId and a known rule type are required" }, { status: 400 });
   }
@@ -46,6 +53,9 @@ export async function POST(req: NextRequest) {
     include: { shiftDefinitions: { select: { code: true } } },
   });
   if (!ward) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const scope = await resolveGroupScope(groupId, guard.user.hospitalId);
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: 400 });
 
   if (tierId) {
     const tier = await prisma.staffTier.findFirst({
@@ -66,9 +76,26 @@ export async function POST(req: NextRequest) {
     cleaned[key] = Number.isFinite(given) && given > 0 ? given : fallback;
   }
 
+  const duplicate = await prisma.wardRule.findFirst({
+    where: {
+      wardId,
+      groupId: scope.groupId,
+      type,
+      tierId: tierId || null,
+      shiftCode: shiftCode || null,
+    },
+  });
+  if (duplicate) {
+    return NextResponse.json(
+      { error: "That rule is already set for this scope" },
+      { status: 409 },
+    );
+  }
+
   const rule = await prisma.wardRule.create({
     data: {
       wardId,
+      groupId: scope.groupId,
       type,
       params: cleaned,
       tierId: tierId || null,

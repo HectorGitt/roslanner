@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "prisma generate && next dev",
+    "//dev": "No prisma generate here: on Windows it can't replace the query engine DLL while another dev server holds it, which stops dev starting. postinstall covers a fresh clone, build covers CI.",
+    "dev": "next dev",
     "//build": "Generate explicitly: npm no longer runs dependency install scripts by default, so Prisma's postinstall can't be relied on to produce the client on a build host.",
     "build": "prisma generate && next build",
     "start": "next start",

@@ -17,7 +17,13 @@ interface RosterRow {
   days: number;
   status: string;
   ward: { name: string };
+  group: { id: string; name: string } | null;
   createdAt: string;
+}
+interface GroupRow {
+  id: string;
+  name: string;
+  roles: { id: string; name: string }[];
 }
 
 export default function RostersPage() {
@@ -26,7 +32,10 @@ export default function RostersPage() {
   const [rosters, setRosters] = useState<RosterRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [groups, setGroups] = useState<GroupRow[]>([]);
   const [wardId, setWardId] = useState("");
+  // "" = the whole ward, which is what a roster covers when no groups exist.
+  const [groupId, setGroupId] = useState("");
   const [startDate, setStartDate] = useState("");
   // Follows the chosen ward's own cycle length until the planner overrides it.
   const [days, setDays] = useState(7);
@@ -34,11 +43,17 @@ export default function RostersPage() {
   const [error, setError] = useState("");
 
   const load = () =>
-    Promise.all([api<WardRow[]>("/api/wards"), api<RosterRow[]>("/api/rosters")])
-      .then(([w, r]) => {
+    Promise.all([
+      api<WardRow[]>("/api/wards"),
+      api<RosterRow[]>("/api/rosters"),
+      api<GroupRow[]>("/api/groups"),
+    ])
+      .then(([w, r, g]) => {
         setWards(w);
         setRosters(r);
+        setGroups(g);
       })
+      .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
 
   useEffect(() => {
@@ -52,7 +67,7 @@ export default function RostersPage() {
     try {
       const res = await api<{ rosterId: string }>("/api/rosters", {
         method: "POST",
-        body: JSON.stringify({ wardId, startDate, days }),
+        body: JSON.stringify({ wardId, groupId: groupId || null, startDate, days }),
       });
       router.push(`/rosters/${res.rosterId}`);
     } catch (err) {
@@ -104,6 +119,25 @@ export default function RostersPage() {
             ))}
           </select>
         </label>
+        {groups.length > 0 && (
+          <label className="block text-sm">
+            <span className="mb-1.5 block font-medium text-slate-700 dark:text-slate-300">
+              Covers
+            </span>
+            <select
+              value={groupId}
+              onChange={(e) => setGroupId(e.target.value)}
+              className="w-44 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
+            >
+              <option value="">Everyone on the ward</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="block text-sm">
           <span className="mb-1.5 block font-medium text-slate-700 dark:text-slate-300">Start date</span>
           <input
@@ -153,8 +187,16 @@ export default function RostersPage() {
           >
             <Link href={`/rosters/${r.id}`} className="flex-1 hover:text-teal-700 dark:hover:text-teal-400 transition-colors">
               <span className="font-semibold text-slate-900 dark:text-white">{r.ward.name}</span>
+              {r.group && (
+                <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  {r.group.name}
+                </span>
+              )}
               <span className="ml-3 text-sm text-slate-500 dark:text-slate-400">
-                {new Date(r.startDate).toLocaleDateString()} <span className="mx-1">&middot;</span> {r.days} days
+                {/* Calendar dates are stored as UTC midnight; render them as such
+                    or they show a day early west of UTC. */}
+                {new Date(r.startDate).toLocaleDateString(undefined, { timeZone: "UTC" })}{" "}
+                <span className="mx-1">&middot;</span> {r.days} days
               </span>
             </Link>
             <div className="flex items-center gap-4">

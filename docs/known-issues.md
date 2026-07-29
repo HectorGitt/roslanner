@@ -67,6 +67,32 @@ permission level.
 
 ## Modelling
 
+**A staff group is a set of roles, so one person can't be rostered outside their
+role's group.** The nurse who rosters with the medical team can't be expressed —
+you'd have to give them a distinct role. This was chosen over a per-staff group
+field so that a person's group can never contradict their role, and because it
+means one place to configure rather than one per person.
+
+**Group config replaces the ward's rather than merging with it.** A group that
+overrides one shift must list them all. Merging was rejected because a ward-level
+`MORNING` and a group-level `MORNING` with different times would need an invented
+tie-break, and because a ward-wide "3 nurses" requirement would otherwise land in
+the doctors' roster as a shortfall nobody could fill. The UI says which scope it's
+editing and whether anything is currently overridden.
+
+**`CoverageRequirement` has no unique key.** It would have to include
+`daysOfWeek` to allow a weekday/weekend split of the same role, and Prisma can't
+put a list in a unique index — the previous key rejected that split with an
+unhandled 500. It also enforced nothing whenever `roleId` or `tierId` was null,
+since Postgres treats NULLs as distinct. Duplicates are now rejected by the write
+path, which replaces a whole scope at once and so sees the full set.
+
+**Compound uniques containing `groupId` don't constrain the ward-level row**, for
+the same NULL reason — `ShiftDefinition` and `RuleSet` are both affected. Adding
+partial indexes for the `groupId IS NULL` case was considered and rejected:
+Prisma doesn't model them, so `migrate diff` would report them as drift and a
+later `migrate dev` would offer to drop them. Enforced in the write paths instead.
+
 **Draft rosters in different wards can double-book the same person.** Only
 published rosters hold commitments, so a clash between two drafts surfaces when
 the first is published. This is the deliberate trade for letting planners hold

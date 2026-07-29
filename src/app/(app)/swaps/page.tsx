@@ -85,14 +85,26 @@ export default function SwapsPage() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     if (!rosterId) {
-      setDetail(null);
-      return;
+      // Deferred rather than set synchronously, which would cascade a render.
+      Promise.resolve().then(() => {
+        if (!cancelled) setDetail(null);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
-    api<RosterDetail>(`/api/rosters/${rosterId}`).then((d) => {
-      setDetail(d);
-      setOfferedStaff(d.staff[0]?.id ?? "");
-    });
+    api<RosterDetail>(`/api/rosters/${rosterId}`)
+      .then((d) => {
+        if (cancelled) return;
+        setDetail(d);
+        setOfferedStaff(d.staff[0]?.id ?? "");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [rosterId]);
 
   const dateOf = (start: string, dayIndex: number) => {

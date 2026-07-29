@@ -75,6 +75,15 @@ Nothing about the shift model is hardcoded — each hospital configures its own.
   Duty, or clinic sessions are all just data; new wards start from a preset and
   stay editable. One shift per person per day, or a day off.
 - **Cycle length** (per ward): 7 days for weekly wards, 30 for a monthly stretch.
+- **Staff groups** (per hospital): bodies of staff rostered *separately* because
+  their rules don't match — doctors on day and overnight call, nurses on three
+  shifts, domestic staff on weekdays only, all on the same ward. A group is a set
+  of roles, so a person's group comes from their role and the two can't disagree.
+  Each group can have its own shifts, coverage and rules; whatever it doesn't
+  define, it inherits from the ward. Group config **replaces** the ward's for that
+  group rather than adding to it, so one shift code can't mean two different
+  things and a nursing requirement can't leak into the doctors' roster. Groups are
+  optional: a ward with none behaves exactly as before, one roster for everybody.
 - **Staff tiers** (per hospital): your own hierarchy, with per-shift eligibility
   (e.g. senior staff on mornings only, never weekends), tier-specific night caps,
   and pairing rules (an intern is never rostered without a senior present).

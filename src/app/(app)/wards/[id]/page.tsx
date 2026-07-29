@@ -75,6 +75,27 @@ interface Ward {
   floatStaff: FloatIn[];
 }
 
+/**
+ * What the selected group currently has of its own, so it's clear whether you're
+ * about to create an override or edit one. A group with nothing of its own uses
+ * the ward's; saving anything here replaces the ward's for that group entirely.
+ */
+function inheritLabel(
+  tab: Tab,
+  scoped: { requirements: unknown[]; rules: unknown; shiftDefinitions: unknown[] } | null,
+): string {
+  if (!scoped) return "";
+  const has =
+    tab === "shifts"
+      ? scoped.shiftDefinitions.length > 0
+      : tab === "coverage"
+        ? scoped.requirements.length > 0
+        : scoped.rules !== null;
+  return has
+    ? "Overriding the ward — this group uses only what's set here."
+    : "Nothing set, so this group uses the ward's. Saving here overrides it.";
+}
+
 const DEFAULT_RULES: Rules = {
   maxConsecutiveDays: 6,
   maxNightsPerWeek: 3,
@@ -83,6 +104,12 @@ const DEFAULT_RULES: Rules = {
   minRestHours: 8,
   fairnessWindowDays: 0,
 };
+
+interface GroupRow {
+  id: string;
+  name: string;
+  roles: { id: string; name: string }[];
+}
 
 type Tab = "staff" | "shifts" | "coverage" | "rules";
 
@@ -93,25 +120,74 @@ export default function WardDetailPage() {
   const [tiers, setTiers] = useState<Tier[]>([]);
   const [otherWards, setOtherWards] = useState<{ id: string; name: string }[]>([]);
   const [tab, setTab] = useState<Tab>("staff");
+  const [groups, setGroups] = useState<GroupRow[]>([]);
+  /** "" = the ward's own config; otherwise the group whose config we're editing. */
+  const [scope, setScope] = useState("");
+  const [scoped, setScoped] = useState<{
+    scope: string;
+    requirements: Requirement[];
+    rules: Rules | null;
+    shiftDefinitions: ShiftDef[];
+  } | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
-    const [w, r, t, all] = await Promise.all([
+    const [w, r, t, all, g] = await Promise.all([
       api<Ward>(`/api/wards/${id}`),
       api<Role[]>("/api/roles"),
       api<Tier[]>("/api/tiers"),
       api<{ id: string; name: string }[]>("/api/wards"),
+      api<GroupRow[]>("/api/groups"),
     ]);
     setWard(w);
     setRoles(r);
     setTiers(t);
     setOtherWards(all.filter((x) => x.id !== id));
+    setGroups(g);
   }, [id]);
 
   useEffect(() => {
-    load().catch((e) => setError(e.message));
+    let cancelled = false;
+    (async () => {
+      try {
+        await load();
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
+
+  // Shifts, coverage and rules all exist per scope, so they're fetched for the
+  // selected one rather than taken from the ward payload (which holds every scope).
+  const loadScoped = useCallback(async () => {
+    const q = scope ? `&groupId=${scope}` : "";
+    const [requirements, rules, shiftDefinitions] = await Promise.all([
+      api<Requirement[]>(`/api/coverage?wardId=${id}${q}`),
+      api<Rules | null>(`/api/rules?wardId=${id}${q}`),
+      api<ShiftDef[]>(`/api/shift-definitions?wardId=${id}${q}`),
+    ]);
+    setScoped({ scope, requirements, rules, shiftDefinitions });
+  }, [id, scope]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await loadScoped();
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadScoped]);
+
+  const config = scoped?.scope === scope ? scoped : null;
 
   if (error) return <p className="text-red-600">{error}</p>;
   if (!ward) return <p className="text-slate-500">Loading…</p>;
@@ -153,6 +229,33 @@ export default function WardDetailPage() {
         ))}
       </div>
 
+      {tab !== "staff" && groups.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/60">
+          <label className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="font-medium text-slate-700 dark:text-slate-300">
+              Editing config for
+            </span>
+            <select
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+            >
+              <option value="">the whole ward</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name} only
+                </option>
+              ))}
+            </select>
+            {scope && (
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {inheritLabel(tab, config)}
+              </span>
+            )}
+          </label>
+        </div>
+      )}
+
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
       {tab === "staff" && (
@@ -164,36 +267,45 @@ export default function WardDetailPage() {
           onChanged={load}
         />
       )}
-      {tab === "shifts" && (
+      {tab === "shifts" && config && (
         <ShiftsTab
-          ward={ward}
+          key={`shifts-${scope}`}
+          ward={{ ...ward, ...config }}
+          groupId={scope}
           onSaved={(msg) => {
             setNotice(msg);
             setTimeout(() => setNotice(""), 5000);
             load();
+            loadScoped();
           }}
         />
       )}
-      {tab === "coverage" && (
+      {tab === "coverage" && config && (
         <CoverageTab
-          ward={ward}
+          key={`coverage-${scope}`}
+          ward={{ ...ward, ...config }}
+          groupId={scope}
           roles={roles}
           tiers={tiers}
           onSaved={() => {
             setNotice("Coverage saved.");
             setTimeout(() => setNotice(""), 2500);
             load();
+            loadScoped();
           }}
         />
       )}
-      {tab === "rules" && (
+      {tab === "rules" && config && (
         <RulesTab
-          ward={ward}
+          key={`rules-${scope}`}
+          ward={{ ...ward, ...config }}
+          groupId={scope}
           tiers={tiers}
           onSaved={() => {
             setNotice("Rules saved.");
             setTimeout(() => setNotice(""), 2500);
             load();
+            loadScoped();
           }}
         />
       )}
@@ -471,11 +583,14 @@ function StaffTab({
 
 function CoverageTab({
   ward,
+  groupId,
   roles,
   tiers,
   onSaved,
 }: {
   ward: Ward;
+  /** "" = the ward's own coverage; otherwise the group this override belongs to. */
+  groupId: string;
   roles: Role[];
   tiers: Tier[];
   onSaved: () => void;
@@ -554,7 +669,7 @@ function CoverageTab({
         });
       await api('/api/coverage', {
         method: 'PUT',
-        body: JSON.stringify({ wardId: ward.id, items }),
+        body: JSON.stringify({ wardId: ward.id, groupId: groupId || null, items }),
       });
       onSaved();
     } catch (e) {
@@ -704,10 +819,13 @@ function CoverageTab({
 
 function RulesTab({
   ward,
+  groupId,
   tiers,
   onSaved,
 }: {
   ward: Ward;
+  /** "" = the ward's own rules; otherwise the group these belong to. */
+  groupId: string;
   tiers: Tier[];
   onSaved: () => void;
 }) {
@@ -718,7 +836,7 @@ function RulesTab({
     setSaving(true);
     await api("/api/rules", {
       method: "PUT",
-      body: JSON.stringify({ wardId: ward.id, ...rules }),
+      body: JSON.stringify({ wardId: ward.id, groupId: groupId || null, ...rules }),
     });
     setSaving(false);
     onSaved();
@@ -826,7 +944,7 @@ function RulesTab({
         {saving ? "Saving…" : "Save rules"}
       </button>
       </div>
-      <ExtraRulesPanel ward={ward} tiers={tiers} />
+      <ExtraRulesPanel key={`extra-${groupId}`} ward={ward} groupId={groupId} tiers={tiers} />
     </div>
   );
 }
@@ -861,7 +979,16 @@ const RULE_INFO: Record<
  * Rules that carry their own setting, kept apart from the plain numeric limits
  * because they may also apply to just one tier or one shift.
  */
-function ExtraRulesPanel({ ward, tiers }: { ward: Ward; tiers: Tier[] }) {
+function ExtraRulesPanel({
+  ward,
+  groupId,
+  tiers,
+}: {
+  ward: Ward;
+  /** "" = the ward's own extra rules; otherwise the group's. */
+  groupId: string;
+  tiers: Tier[];
+}) {
   const [rules, setRules] = useState<WardRuleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -872,10 +999,12 @@ function ExtraRulesPanel({ ward, tiers }: { ward: Ward; tiers: Tier[] }) {
 
   const load = useCallback(
     () =>
-      api<{ items: WardRuleRow[] }>("/api/ward-rules?wardId=" + ward.id)
+      api<{ items: WardRuleRow[] }>(
+        `/api/ward-rules?wardId=${ward.id}${groupId ? `&groupId=${groupId}` : ""}`,
+      )
         .then((r) => setRules(r.items))
         .finally(() => setLoading(false)),
-    [ward.id],
+    [ward.id, groupId],
   );
 
   useEffect(() => {
@@ -892,6 +1021,7 @@ function ExtraRulesPanel({ ward, tiers }: { ward: Ward; tiers: Tier[] }) {
         method: "POST",
         body: JSON.stringify({
           wardId: ward.id,
+          groupId: groupId || null,
           type,
           params: info.param ? { [info.param.key]: paramValue } : {},
           tierId: tierId || null,
@@ -1066,9 +1196,12 @@ interface DraftShift {
 
 function ShiftsTab({
   ward,
+  groupId,
   onSaved,
 }: {
   ward: Ward;
+  /** "" = the ward's own shifts; otherwise the group these belong to. */
+  groupId: string;
   onSaved: (message: string) => void;
 }) {
   const [shifts, setShifts] = useState<DraftShift[]>(() =>
@@ -1115,7 +1248,7 @@ function ShiftsTab({
       });
       const res = await api<{ orphanedAssignments: number }>("/api/shift-definitions", {
         method: "PUT",
-        body: JSON.stringify({ wardId: ward.id, items: shifts }),
+        body: JSON.stringify({ wardId: ward.id, groupId: groupId || null, items: shifts }),
       });
       onSaved(
         res.orphanedAssignments > 0

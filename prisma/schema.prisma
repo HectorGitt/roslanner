@@ -17,6 +17,7 @@ model Hospital {
   wards      Ward[]
   roles      Role[]
   tiers      StaffTier[]
+  groups     StaffGroup[]
   holidays   PublicHoliday[]
   createdAt  DateTime        @default(now())
 }
@@ -114,7 +115,7 @@ model Ward {
   requirements     CoverageRequirement[]
   staff            Staff[]
   rosters          Roster[]
-  rules            RuleSet?
+  rules            RuleSet[]
   shiftDefinitions ShiftDefinition[]
   /// Staff based elsewhere who may also be rostered here (float pool).
   floatStaff       StaffWardEligibility[]
@@ -164,19 +165,27 @@ model StaffDailyCommitment {
 // uses Morning/Afternoon/Night. Existing wards get these three backfilled
 // automatically so nothing changes until an admin configures otherwise.
 model ShiftDefinition {
-  id              String   @id @default(cuid())
+  id              String      @id @default(cuid())
   wardId          String
-  ward            Ward     @relation(fields: [wardId], references: [id], onDelete: Cascade)
-  code            String   // stable short code, e.g. "MORNING", "CALL_DUTY"
-  label           String   // hospital's own display name
+  ward            Ward        @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  /// Null = the ward's own shifts. Set = shifts for that group only, which
+  /// replace the ward's entirely for that group's rosters rather than adding to
+  /// them, so one code can never resolve to two different sets of times.
+  groupId         String?
+  group           StaffGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  code            String      // stable short code, e.g. "MORNING", "CALL_DUTY"
+  label           String      // hospital's own display name
   startMinutes    Int
   endMinutes      Int
-  crossesMidnight Boolean  @default(false)
-  isNightLike     Boolean  @default(false)
+  crossesMidnight Boolean     @default(false)
+  isNightLike     Boolean     @default(false)
   payrollTag      String?
-  sortOrder       Int      @default(0)
+  sortOrder       Int         @default(0)
 
-  @@unique([wardId, code])
+  /// Postgres treats NULLs as distinct, so this does not stop two ward-level
+  /// rows sharing a code. The write path replaces a whole scope at once and
+  /// rejects duplicate codes in the payload, which is where it is enforced.
+  @@unique([wardId, groupId, code])
 }
 
 // ===== Staff tiers (hospital-defined hierarchy) =====
@@ -234,11 +243,41 @@ model TierPairingRule {
   @@unique([dependentTierId, requiredTierId, shiftCode])
 }
 
+/// A body of staff rostered separately because their rules differ — "Medical",
+/// "Nursing", "Domestic". A group is a *set of roles*, so a person's group comes
+/// from their role and the two can never disagree.
+///
+/// Groups are optional. A ward with none behaves exactly as it did before: one
+/// roster covering everybody under one set of rules.
+model StaffGroup {
+  id           String                @id @default(cuid())
+  hospitalId   String
+  hospital     Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  name         String
+  sortOrder    Int                   @default(0)
+  roles        Role[]
+  /// Config that overrides the ward's for this group. Restrict, not Cascade or
+  /// SetNull: deleting a group that owns rules would otherwise either destroy
+  /// them or silently widen them to the whole ward. The API turns the resulting
+  /// error into a 409 telling you what still points at it.
+  shiftDefinitions ShiftDefinition[]
+  requirements     CoverageRequirement[]
+  ruleSets         RuleSet[]
+  wardRules        WardRule[]
+  rosters          Roster[]
+
+  @@unique([hospitalId, name])
+}
+
 model Role {
   id           String                @id @default(cuid())
   name         String
   hospitalId   String
   hospital     Hospital              @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  /// Which body of staff this role is rostered with. Null = not grouped, so it
+  /// only appears in whole-ward rosters.
+  groupId      String?
+  group        StaffGroup?           @relation(fields: [groupId], references: [id], onDelete: SetNull)
   staff        Staff[]
   requirements CoverageRequirement[]
 
@@ -277,6 +316,11 @@ model CoverageRequirement {
   id       String     @id @default(cuid())
   wardId   String
   ward     Ward       @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  /// Null = the ward's own requirements. Set = requirements for that group's
+  /// rosters, replacing the ward's for that group — so "3 nurses on Morning"
+  /// cannot leak into the doctors' roster and report a shortfall nobody can fill.
+  groupId  String?
+  group    StaffGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict)
   shift    String
   roleId   String?
   role     Role?      @relation(fields: [roleId], references: [id], onDelete: Cascade)
@@ -289,19 +333,30 @@ model CoverageRequirement {
   /// ward run lighter weekend cover.
   daysOfWeek Int[]    @default([])
   /// How public holidays are treated:
-  ///   SAME    – follow the day of week the holiday falls on (default)
-  ///   EXCLUDE – don't apply on holidays (clinic shut)
-  ///   ONLY    – apply only on holidays (skeleton holiday cover)
+  ///   SAME    - follow the day of week the holiday falls on (default)
+  ///   EXCLUDE - do not apply on holidays (clinic shut)
+  ///   ONLY    - apply only on holidays (skeleton holiday cover)
   holidayRule String  @default("SAME")
 
-  @@unique([wardId, shift, roleId, tierId, holidayRule])
+  /// Deliberately no unique key. It would have to include daysOfWeek to allow a
+  /// weekday/weekend split of the same role, and Prisma cannot put a list in a
+  /// unique index; the previous key rejected that split with an unhandled 500.
+  /// It also enforced nothing whenever roleId or tierId was null, since Postgres
+  /// treats NULLs as distinct. The write path replaces a whole scope at once and
+  /// rejects duplicates in the payload, which is where it is enforced.
+  @@index([wardId, groupId])
 }
 
 // Per-ward scheduling rules.
 model RuleSet {
   id                   String @id @default(cuid())
-  wardId               String @unique
+  wardId               String
   ward                 Ward   @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  /// Null = the ward's rules. Set = that group's rules, used instead of the
+  /// ward's. Not upserted on this key: a compound unique containing a NULL never
+  /// matches in Postgres, so the write path looks the row up first.
+  groupId              String?
+  group                StaffGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict)
   maxConsecutiveDays   Int    @default(6)
   maxNightsPerWeek     Int    @default(3)
   minDaysOffPerWeek    Int    @default(1)
@@ -315,6 +370,8 @@ model RuleSet {
   /// are balanced over a rolling window rather than resetting each roster.
   /// 0 = judge each roster on its own (the original behaviour).
   fairnessWindowDays   Int    @default(0)
+
+  @@unique([wardId, groupId])
 }
 
 /// Rules whose shape doesn't fit a fixed column: they may be scoped to a tier or
@@ -335,6 +392,9 @@ model WardRule {
   tierId    String?
   tier      StaffTier? @relation(fields: [tierId], references: [id], onDelete: Cascade)
   shiftCode String?
+  /// Null = the ward's rules. Set = that group's, used instead of the ward's.
+  groupId   String?
+  group     StaffGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict)
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
 }
@@ -366,6 +426,10 @@ model Roster {
   id          String                 @id @default(cuid())
   wardId      String
   ward        Ward                   @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  /// Which body of staff this roster covers. Null = the whole ward, which is
+  /// what every roster was before groups existed.
+  groupId     String?
+  group       StaffGroup?            @relation(fields: [groupId], references: [id], onDelete: Restrict)
   startDate   DateTime
   days        Int
   status      String                 @default("DRAFT") // DRAFT | PUBLISHED

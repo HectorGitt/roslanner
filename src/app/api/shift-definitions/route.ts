@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireHospitalUser } from "@/lib/session";
+import { resolveGroupScope } from "@/lib/group-scope";
 
 export async function GET(req: NextRequest) {
   const guard = await requireHospitalUser();
@@ -9,8 +10,14 @@ export async function GET(req: NextRequest) {
   const wardId = req.nextUrl.searchParams.get("wardId");
   if (!wardId) return NextResponse.json({ error: "wardId required" }, { status: 400 });
 
+  const scope = await resolveGroupScope(
+    req.nextUrl.searchParams.get("groupId"),
+    guard.user.hospitalId,
+  );
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: 400 });
+
   const items = await prisma.shiftDefinition.findMany({
-    where: { wardId, ward: { hospitalId: guard.user.hospitalId } },
+    where: { wardId, groupId: scope.groupId, ward: { hospitalId: guard.user.hospitalId } },
     orderBy: { sortOrder: "asc" },
   });
   return NextResponse.json(items);
@@ -37,7 +44,7 @@ export async function PUT(req: NextRequest) {
   const guard = await requireHospitalUser();
   if (guard.response) return guard.response;
 
-  const { wardId, items } = await req.json();
+  const { wardId, groupId, items } = await req.json();
   if (!wardId || !Array.isArray(items)) {
     return NextResponse.json({ error: "wardId and items required" }, { status: 400 });
   }
@@ -45,6 +52,9 @@ export async function PUT(req: NextRequest) {
     where: { id: wardId, hospitalId: guard.user.hospitalId },
   });
   if (!ward) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const scope = await resolveGroupScope(groupId, guard.user.hospitalId);
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: 400 });
 
   const cleaned: ShiftInput[] = [];
   for (const raw of items as ShiftInput[]) {
@@ -89,16 +99,21 @@ export async function PUT(req: NextRequest) {
   const keptCodes = new Set(cleaned.map((c) => c.code));
   const orphanedAssignments = await prisma.assignment.count({
     where: {
-      roster: { wardId },
+      roster: { wardId, groupId: scope.groupId },
       shift: { notIn: [...keptCodes, "DO"] },
     },
   });
 
+  const droppedCoverage = await prisma.coverageRequirement.count({
+    where: { wardId, groupId: scope.groupId, shift: { notIn: [...keptCodes] } },
+  });
+
   await prisma.$transaction([
-    prisma.shiftDefinition.deleteMany({ where: { wardId } }),
+    prisma.shiftDefinition.deleteMany({ where: { wardId, groupId: scope.groupId } }),
     prisma.shiftDefinition.createMany({
       data: cleaned.map((c, i) => ({
         wardId,
+        groupId: scope.groupId,
         code: c.code,
         label: c.label,
         startMinutes: c.startMinutes,
@@ -113,13 +128,16 @@ export async function PUT(req: NextRequest) {
     // Coverage rows for removed shifts would demand staff for a shift that no
     // longer exists, so drop them alongside.
     prisma.coverageRequirement.deleteMany({
-      where: { wardId, shift: { notIn: [...keptCodes] } },
+      where: { wardId, groupId: scope.groupId, shift: { notIn: [...keptCodes] } },
     }),
   ]);
 
   const saved = await prisma.shiftDefinition.findMany({
-    where: { wardId },
+    where: { wardId, groupId: scope.groupId },
     orderBy: { sortOrder: "asc" },
   });
-  return NextResponse.json({ items: saved, orphanedAssignments });
+  // droppedCoverage is reported because removing a shift silently takes its
+  // staffing requirements with it, which would otherwise leave the ward
+  // unrosterable with no explanation.
+  return NextResponse.json({ items: saved, orphanedAssignments, droppedCoverage });
 }

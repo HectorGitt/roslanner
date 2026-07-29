@@ -18,11 +18,16 @@ async function findOwnRoster(id: string, hospitalId: string) {
 async function buildRosterPayload(id: string) {
   const roster = await prisma.roster.findUnique({
     where: { id },
-    include: { ward: true, assignments: true },
+    include: { ward: true, group: true, assignments: true },
   });
   if (!roster) return null;
 
-  const input = await loadSolverInput(roster.wardId, roster.startDate, roster.days);
+  const input = await loadSolverInput(
+    roster.wardId,
+    roster.startDate,
+    roster.days,
+    roster.groupId,
+  );
 
   // Staff in the roster may include people since deactivated/removed from input —
   // index rows by the staff that actually have assignments, keeping input order first.
@@ -70,6 +75,7 @@ async function buildRosterPayload(id: string) {
   return {
     id: roster.id,
     ward: roster.ward,
+    group: roster.group,
     startDate: toISODate(roster.startDate),
     days: roster.days,
     status: roster.status,
@@ -130,18 +136,26 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         where: {
           ward: { hospitalId: guard.user.hospitalId },
           OR: [{ wardId: roster.wardId }, { floatWards: { some: { wardId: roster.wardId } } }],
+          // A group roster may only hold that group's staff.
+          ...(roster.groupId ? { role: { groupId: roster.groupId } } : {}),
         },
         select: { id: true },
       }),
       prisma.shiftDefinition.findMany({
         where: { wardId: roster.wardId },
-        select: { code: true },
+        select: { code: true, groupId: true },
       }),
     ]);
     const allowedStaff = new Set(eligible.map((s) => s.id));
     // A shift the ward doesn't define would silently escape the night, rest and
     // hours rules, all of which look the shift up by code.
-    const allowedShifts = new Set([...shiftDefs.map((s) => s.code), DAY_OFF]);
+    // Same override-or-inherit rule the solver uses, so an edit can only name a
+    // shift this roster actually runs.
+    const own = roster.groupId
+      ? shiftDefs.filter((s) => s.groupId === roster.groupId)
+      : [];
+    const inScope = own.length > 0 ? own : shiftDefs.filter((s) => s.groupId === null);
+    const allowedShifts = new Set([...inScope.map((s) => s.code), DAY_OFF]);
 
     for (const e of body.edits) {
       if (!allowedStaff.has(e.staffId)) {
@@ -179,7 +193,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     );
   }
   if (body.reoptimize) {
-    const input = await loadSolverInput(roster.wardId, roster.startDate, roster.days);
+    const input = await loadSolverInput(
+      roster.wardId,
+      roster.startDate,
+      roster.days,
+      roster.groupId,
+    );
     const result = solve(input);
     await prisma.assignment.deleteMany({ where: { rosterId: id } });
     await prisma.assignment.createMany({

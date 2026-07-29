@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireHospitalUser } from "@/lib/session";
+import { resolveGroupScope, scopedRows } from "@/lib/group-scope";
 
 export async function GET(req: NextRequest) {
   const guard = await requireHospitalUser();
@@ -8,8 +9,14 @@ export async function GET(req: NextRequest) {
 
   const wardId = req.nextUrl.searchParams.get("wardId");
   if (!wardId) return NextResponse.json({ error: "wardId required" }, { status: 400 });
+  const scope = await resolveGroupScope(
+    req.nextUrl.searchParams.get("groupId"),
+    guard.user.hospitalId,
+  );
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: 400 });
+
   const items = await prisma.coverageRequirement.findMany({
-    where: { wardId, ward: { hospitalId: guard.user.hospitalId } },
+    where: { wardId, groupId: scope.groupId, ward: { hospitalId: guard.user.hospitalId } },
   });
   return NextResponse.json(items);
 }
@@ -38,7 +45,7 @@ export async function PUT(req: NextRequest) {
   const guard = await requireHospitalUser();
   if (guard.response) return guard.response;
 
-  const { wardId, items } = await req.json();
+  const { wardId, groupId, items } = await req.json();
   if (!wardId || !Array.isArray(items)) {
     return NextResponse.json({ error: "wardId and items required" }, { status: 400 });
   }
@@ -47,6 +54,9 @@ export async function PUT(req: NextRequest) {
     include: { shiftDefinitions: true },
   });
   if (!ward) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const scope = await resolveGroupScope(groupId, guard.user.hospitalId);
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: 400 });
 
   const [roles, tiers] = await Promise.all([
     prisma.role.findMany({
@@ -58,12 +68,17 @@ export async function PUT(req: NextRequest) {
       select: { id: true },
     }),
   ]);
-  const validShifts = new Set(ward.shiftDefinitions.map((s) => s.code));
+  // The shifts this scope runs, under the same override-or-inherit rule as the
+  // solver — a group's coverage can only name shifts that group works.
+  const validShifts = new Set(
+    scopedRows(ward.shiftDefinitions, scope.groupId).map((s) => s.code),
+  );
   const validRoles = new Set(roles.map((r) => r.id));
   const validTiers = new Set(tiers.map((t) => t.id));
 
   const data: {
     wardId: string;
+    groupId: string | null;
     shift: string;
     roleId: string | null;
     tierId: string | null;
@@ -96,6 +111,7 @@ export async function PUT(req: NextRequest) {
       .sort();
     data.push({
       wardId,
+      groupId: scope.groupId,
       shift: raw.shift,
       roleId: raw.roleId || null,
       tierId: raw.tierId || null,
@@ -105,10 +121,24 @@ export async function PUT(req: NextRequest) {
     });
   }
 
+  const seen = new Set<string>();
+  for (const d of data) {
+    const key = [d.shift, d.roleId ?? "", d.tierId ?? "", d.holidayRule, d.daysOfWeek.join(".")].join("|");
+    if (seen.has(key)) {
+      return NextResponse.json(
+        { error: "Two requirements have the same shift, scope and days" },
+        { status: 400 },
+      );
+    }
+    seen.add(key);
+  }
+
   await prisma.$transaction([
-    prisma.coverageRequirement.deleteMany({ where: { wardId } }),
+    prisma.coverageRequirement.deleteMany({ where: { wardId, groupId: scope.groupId } }),
     prisma.coverageRequirement.createMany({ data }),
   ]);
-  const saved = await prisma.coverageRequirement.findMany({ where: { wardId } });
+  const saved = await prisma.coverageRequirement.findMany({
+    where: { wardId, groupId: scope.groupId },
+  });
   return NextResponse.json(saved);
 }

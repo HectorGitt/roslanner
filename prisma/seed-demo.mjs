@@ -396,11 +396,202 @@ async function main() {
   console.log("Ward rules: General needs a lead per shift and caps 48h/week; A&E has a 7-night block pattern");
 
   // ---- Balance fairness over the last month ------------------------------
-  await prisma.ruleSet.update({
-    where: { wardId: general.id },
+  // Not `where: { wardId }` — a ward can now hold one rule set per staff group
+  // as well as its own, so wardId alone no longer identifies a row.
+  await prisma.ruleSet.updateMany({
+    where: { wardId: general.id, groupId: null },
     data: { fairnessWindowDays: 30, minRestHours: 8 },
   });
   console.log("General Ward: fairness balanced over a 30-day window");
+
+  // ---- Staff groups: doctors, nurses and domestic staff rostered apart ----
+  // Some hospitals can't put every body of staff on one roster, because the
+  // rules don't match: doctors work day + overnight call, nurses run three
+  // shifts, domestic staff come in on weekdays only. Groups let all three share
+  // a ward while being rostered separately. A group that defines no shifts,
+  // coverage or rules of its own just uses the ward's.
+  const GROUPS = [
+    { name: "Medical", sortOrder: 0, roles: ["Doctor"] },
+    { name: "Nursing", sortOrder: 1, roles: ["Nurse"] },
+    { name: "Domestic", sortOrder: 2, roles: ["Porter"] },
+  ];
+  const groupByName = {};
+  for (const g of GROUPS) {
+    const existing = await prisma.staffGroup.findFirst({
+      where: { hospitalId, name: g.name },
+    });
+    groupByName[g.name] =
+      existing ??
+      (await prisma.staffGroup.create({
+        data: { hospitalId, name: g.name, sortOrder: g.sortOrder },
+      }));
+    for (const roleName of g.roles) {
+      const role = roleName === "Porter" ? porterRole : roleByName[roleName];
+      if (role) {
+        await prisma.role.update({
+          where: { id: role.id },
+          data: { groupId: groupByName[g.name].id },
+        });
+      }
+    }
+  }
+  console.log(
+    `Groups: ${GROUPS.map((g) => `${g.name} (${g.roles.join(", ")})`).join(", ")}`,
+  );
+
+  // The surgical ward shows the split in practice. Matched case-insensitively
+  // because it was created by hand in the UI, so its capitalisation isn't fixed.
+  const surgical = await prisma.ward.findFirst({
+    where: { hospitalId, name: { equals: "Male surgical ward", mode: "insensitive" } },
+  });
+  if (surgical) {
+    // It was created empty through the UI, so give it staff to roster.
+    const surgicalStaff = [
+      ["Dr. Ibrahim", roleByName["Doctor"]],
+      ["Dr. Chukwu", roleByName["Doctor"]],
+      ["Dr. Lawal", roleByName["Doctor"]],
+      ["Dr. Adeleke", roleByName["Doctor"]],
+      ["Nurse Bisi", roleByName["Nurse"]],
+      ["Nurse Dorcas", roleByName["Nurse"]],
+      ["Nurse Esther", roleByName["Nurse"]],
+      ["Nurse Fatima", roleByName["Nurse"]],
+      ["Nurse Gloria", roleByName["Nurse"]],
+      ["Nurse Hauwa", roleByName["Nurse"]],
+      ["Mr. Danjuma (Porter)", porterRole],
+      ["Mr. Emeka (Porter)", porterRole],
+    ];
+    for (const [name, role] of surgicalStaff) {
+      if (!role) continue;
+      const already = await prisma.staff.findFirst({
+        where: { wardId: surgical.id, name },
+      });
+      if (!already) {
+        await prisma.staff.create({
+          data: { name, roleId: role.id, wardId: surgical.id },
+        });
+      }
+    }
+
+    const medical = groupByName["Medical"].id;
+    const nursing = groupByName["Nursing"].id;
+    const domestic = groupByName["Domestic"].id;
+
+    // Doctors: a day shift and an overnight call — the Category B pattern.
+    await prisma.shiftDefinition.deleteMany({
+      where: { wardId: surgical.id, groupId: medical },
+    });
+    await prisma.shiftDefinition.createMany({
+      data: [
+        {
+          wardId: surgical.id,
+          groupId: medical,
+          code: "DAY",
+          label: "Day",
+          startMinutes: 8 * 60,
+          endMinutes: 16 * 60,
+          crossesMidnight: false,
+          isNightLike: false,
+          sortOrder: 0,
+        },
+        {
+          wardId: surgical.id,
+          groupId: medical,
+          code: "CALL",
+          label: "Call Duty",
+          startMinutes: 16 * 60,
+          endMinutes: 8 * 60,
+          crossesMidnight: true,
+          isNightLike: true,
+          payrollTag: "CALL_ALLOWANCE",
+          sortOrder: 1,
+        },
+      ],
+    });
+
+    // Domestic staff: a single weekday shift, no nights.
+    await prisma.shiftDefinition.deleteMany({
+      where: { wardId: surgical.id, groupId: domestic },
+    });
+    await prisma.shiftDefinition.create({
+      data: {
+        wardId: surgical.id,
+        groupId: domestic,
+        code: "CLEAN",
+        label: "Cleaning",
+        startMinutes: 7 * 60,
+        endMinutes: 15 * 60,
+        crossesMidnight: false,
+        isNightLike: false,
+        sortOrder: 0,
+      },
+    });
+    // Nursing defines none, so it inherits the ward's Morning/Afternoon/Night.
+
+    const scopes = [
+      [
+        medical,
+        [
+          { shift: "DAY", roleId: roleByName["Doctor"]?.id ?? null, required: 1 },
+          { shift: "CALL", roleId: roleByName["Doctor"]?.id ?? null, required: 1 },
+        ],
+      ],
+      [
+        nursing,
+        [
+          { shift: "MORNING", roleId: roleByName["Nurse"]?.id ?? null, required: 2 },
+          { shift: "AFTERNOON", roleId: roleByName["Nurse"]?.id ?? null, required: 1 },
+          { shift: "NIGHT", roleId: roleByName["Nurse"]?.id ?? null, required: 1 },
+        ],
+      ],
+      [
+        domestic,
+        // Weekdays only: nobody cleans at the weekend.
+        [{ shift: "CLEAN", roleId: porterRole.id, required: 1, daysOfWeek: [1, 2, 3, 4, 5] }],
+      ],
+    ];
+    for (const [groupId, items] of scopes) {
+      await prisma.coverageRequirement.deleteMany({
+        where: { wardId: surgical.id, groupId },
+      });
+      await prisma.coverageRequirement.createMany({
+        data: items.map((i) => ({
+          wardId: surgical.id,
+          groupId,
+          shift: i.shift,
+          roleId: i.roleId,
+          required: i.required,
+          daysOfWeek: i.daysOfWeek ?? [],
+        })),
+      });
+    }
+
+    // Doctors carry tighter limits than the ward's.
+    const medFields = {
+      maxConsecutiveDays: 5,
+      maxNightsPerWeek: 2,
+      maxConsecutiveNights: 2,
+      minDaysOffPerWeek: 2,
+      // A call ends at 08:00 and a day starts at 08:00, so any rest requirement
+      // above zero would make the pattern unsatisfiable.
+      minRestHours: 0,
+      fairnessWindowDays: 0,
+    };
+    const medRules = await prisma.ruleSet.findFirst({
+      where: { wardId: surgical.id, groupId: medical },
+    });
+    if (medRules) {
+      await prisma.ruleSet.update({ where: { id: medRules.id }, data: medFields });
+    } else {
+      await prisma.ruleSet.create({
+        data: { wardId: surgical.id, groupId: medical, ...medFields },
+      });
+    }
+
+    console.log(
+      "Male Surgical Ward: Medical on Day/Call with tighter limits, Nursing on the " +
+        "ward's three shifts, Domestic weekday-only — three separate rosters.",
+    );
+  }
 
   // ---- Rosters -----------------------------------------------------------
   if (RESET_ROSTERS) {

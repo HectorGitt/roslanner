@@ -1,4 +1,4 @@
-import { addDays, daysBetween, parseISODate, startOfDay, toISODate } from "@/lib/dates";
+import { addDays, daysBetween, startOfDay, toISODate } from "@/lib/dates";
 import { prisma } from "@/lib/db";
 import {
   CoverageReq,
@@ -25,30 +25,61 @@ const DEFAULT_RULES: Rules = {
   fairnessWindowDays: 0,
 };
 
-/** Build the solver/validator input for a ward + period from the database. */
+/**
+ * Pick the rows that apply to one group, given rows scoped either to a group or
+ * to the whole ward.
+ *
+ * A group's own rows replace the ward's rather than adding to them. Merging
+ * would let a ward-wide MORNING and a Nursing MORNING both exist with different
+ * clock times, needing an invented tie-break, and would let "3 nurses on
+ * Morning" leak into the doctors' roster as a shortfall nobody could fill.
+ * So: if this group has defined any of a given kind of config, that is the whole
+ * answer; otherwise it inherits the ward's.
+ */
+function forGroup<T extends { groupId: string | null }>(
+  rows: T[],
+  groupId: string | null,
+): T[] {
+  if (groupId) {
+    const own = rows.filter((r) => r.groupId === groupId);
+    if (own.length > 0) return own;
+  }
+  return rows.filter((r) => r.groupId === null);
+}
+
+/**
+ * Build the solver/validator input for a ward + period from the database.
+ *
+ * `groupId` narrows it to one body of staff — doctors, nurses, domestic — with
+ * that group's own shifts, coverage and rules. Null covers the whole ward under
+ * the ward's own config, which is what every roster was before groups existed.
+ */
 export async function loadSolverInput(
   wardId: string,
   startDate: Date,
   days: number,
+  groupId: string | null = null,
 ): Promise<SolverInput> {
   const ward = await prisma.ward.findUniqueOrThrow({
     where: { id: wardId },
     select: { hospitalId: true },
   });
 
-  const [staff, requirements, ruleSet, shiftDefsRaw, tiersRaw, pairingsRaw, wardRulesRaw] =
+  const [staffRaw, requirementsRaw, ruleSetsRaw, shiftDefsAll, tiersRaw, pairingsRaw, wardRulesRaw] =
     await Promise.all([
       // Staff based here, plus anyone from the float pool eligible for this ward.
+      // A group roster covers only staff whose role belongs to that group.
       prisma.staff.findMany({
         where: {
           active: true,
           OR: [{ wardId }, { floatWards: { some: { wardId } } }],
+          ...(groupId ? { role: { groupId } } : {}),
         },
         include: { role: true, tier: true },
         orderBy: [{ role: { name: "asc" } }, { name: "asc" }],
       }),
       prisma.coverageRequirement.findMany({ where: { wardId } }),
-      prisma.ruleSet.findUnique({ where: { wardId } }),
+      prisma.ruleSet.findMany({ where: { wardId } }),
       prisma.shiftDefinition.findMany({
         where: { wardId },
         orderBy: { sortOrder: "asc" },
@@ -62,6 +93,14 @@ export async function loadSolverInput(
       }),
       prisma.wardRule.findMany({ where: { wardId, enabled: true } }),
     ]);
+
+  const staff = staffRaw;
+  const requirements = forGroup(requirementsRaw, groupId);
+  const shiftDefsRaw = forGroup(shiftDefsAll, groupId);
+  const wardRules = forGroup(wardRulesRaw, groupId);
+  // Not findUnique on (wardId, groupId): a compound unique containing a NULL
+  // never matches in Postgres, so the ward default has to be found by filter.
+  const ruleSet = forGroup(ruleSetsRaw, groupId)[0] ?? null;
 
   const shiftDefs: ShiftDef[] = shiftDefsRaw.map((sd) => ({
     code: sd.code,
@@ -184,7 +223,7 @@ export async function loadSolverInput(
 
   const rules = ruleSet ?? DEFAULT_RULES;
 
-  const wardRules: WardRule[] = wardRulesRaw.map((r) => ({
+  const resolvedWardRules: WardRule[] = wardRules.map((r) => ({
     type: r.type as RuleType,
     params: (r.params ?? {}) as WardRule["params"],
     tierId: r.tierId ?? undefined,
@@ -234,7 +273,7 @@ export async function loadSolverInput(
     floatStaffIds: staff.filter((s) => s.wardId !== wardId).map((s) => s.id),
     publicHolidayDayIndexes,
     priorStats,
-    wardRules,
+    wardRules: resolvedWardRules,
     // Filled by the caller for an existing roster; a fresh solve starts with none.
     chargeLeads: [],
   };

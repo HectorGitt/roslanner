@@ -26,7 +26,28 @@ export async function GET(_req: NextRequest, { params }: Params) {
     },
   });
   if (!ward) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(ward);
+
+  // A ward can hold one rule set per staff group as well as its own, so `rules`
+  // is now a list. Keep returning the ward's own as a single object — callers
+  // wanting a group's fetch it from /api/rules?groupId=… — and expose the
+  // group-scoped config separately so the UI can tell what overrides exist.
+  const { rules, requirements, shiftDefinitions, ...rest } = ward;
+  return NextResponse.json({
+    ...rest,
+    rules: rules.find((r) => r.groupId === null) ?? null,
+    requirements: requirements.filter((r) => r.groupId === null),
+    shiftDefinitions: shiftDefinitions.filter((s) => s.groupId === null),
+    /** Which groups have config of their own on this ward. */
+    groupOverrides: {
+      rules: rules.filter((r) => r.groupId !== null).map((r) => r.groupId),
+      requirements: [
+        ...new Set(requirements.filter((r) => r.groupId !== null).map((r) => r.groupId)),
+      ],
+      shiftDefinitions: [
+        ...new Set(shiftDefinitions.filter((s) => s.groupId !== null).map((s) => s.groupId)),
+      ],
+    },
+  });
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
