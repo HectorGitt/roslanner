@@ -2,6 +2,17 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import {
+  Alert,
+  Button,
+  EmptyRow,
+  Input,
+  ListCard,
+  LoadingState,
+  PageHeader,
+  TextButton,
+  inputSmClass,
+} from "@/components/ui";
 
 interface GroupRow {
   id: string;
@@ -18,9 +29,6 @@ interface RoleRow {
   group: { id: string; name: string } | null;
   _count: { staff: number };
 }
-
-const inputClass =
-  "rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm";
 
 export default function RolesPage() {
   const [roles, setRoles] = useState<RoleRow[]>([]);
@@ -111,29 +119,24 @@ export default function RolesPage() {
 
   return (
     <div className="max-w-3xl space-y-10">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-          Roles &amp; staff groups
-        </h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Roles are what people do — Doctor, Nurse, Cleaner. A group is a body of
-          staff rostered <em>separately</em> from the rest of the ward, because
-          their rules differ.
-        </p>
-      </div>
+      <PageHeader
+        title="Roles & staff groups"
+        description={
+          <>
+            Roles are what people do — Doctor, Nurse, Cleaner. A group is a body of staff
+            rostered <em>separately</em> from the rest of the ward, because their rules differ.
+          </>
+        }
+      />
 
-      {error && (
-        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-          {error}
-        </p>
-      )}
+      {error && <Alert tone="error">{error}</Alert>}
 
       {loading ? (
-        <p className="text-slate-500 dark:text-slate-400">Loading…</p>
+        <LoadingState label="Loading roles…" />
       ) : (
         <>
           <section className="space-y-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
               Roles
             </h2>
 
@@ -141,42 +144,36 @@ export default function RolesPage() {
               <label className="sr-only" htmlFor="role-name">
                 Role name
               </label>
-              <input
+              <Input
                 id="role-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Doctor"
-                className={`w-64 ${inputClass}`}
+                className="w-64"
               />
-              <button className="rounded-xl bg-teal-600 px-5 py-2 text-sm font-medium text-white shadow-sm shadow-teal-600/20 transition-all hover:bg-teal-700">
-                Add role
-              </button>
+              <Button type="submit">Add role</Button>
             </form>
 
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              {roles.length === 0 && (
-                <p className="px-5 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
-                  No roles yet.
-                </p>
-              )}
+            <ListCard>
+              {roles.length === 0 && <EmptyRow>No roles yet.</EmptyRow>}
               {roles.map((r) => (
                 <div
                   key={r.id}
-                  className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 transition-colors last:border-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
+                  className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                 >
                   <div>
-                    <span className="font-medium text-slate-900 dark:text-white">{r.name}</span>
-                    <span className="ml-3 text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-medium text-zinc-900 dark:text-white">{r.name}</span>
+                    <span className="ml-3 text-xs text-zinc-500 dark:text-zinc-400">
                       {r._count.staff} staff
                     </span>
                   </div>
                   <div className="flex items-center gap-4">
-                    <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <label className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                       Rostered with
                       <select
                         value={r.groupId ?? ""}
                         onChange={(e) => setRoleGroup(r.id, e.target.value)}
-                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                        className={`${inputSmClass} text-xs`}
                       >
                         <option value="">the whole ward</option>
                         {groups.map((g) => (
@@ -186,23 +183,20 @@ export default function RolesPage() {
                         ))}
                       </select>
                     </label>
-                    <button
-                      onClick={() => deleteRole(r.id)}
-                      className="text-xs font-medium text-slate-400 transition-colors hover:text-red-600 dark:hover:text-red-400"
-                    >
+                    <TextButton tone="danger" onClick={() => deleteRole(r.id)}>
                       Delete
-                    </button>
+                    </TextButton>
                   </div>
                 </div>
               ))}
-            </div>
+            </ListCard>
           </section>
 
           <section className="space-y-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
               Staff groups
             </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
               Create a group when one body of staff needs its own shifts or rules —
               doctors on day and call duty while nurses run three shifts on the same
               ward. Each group is then rostered on its own. A group that defines no
@@ -213,33 +207,33 @@ export default function RolesPage() {
               <label className="sr-only" htmlFor="group-name">
                 Group name
               </label>
-              <input
+              <Input
                 id="group-name"
                 value={groupName}
                 onChange={(e) => setGroupName(e.target.value)}
                 placeholder="e.g. Nursing"
-                className={`w-64 ${inputClass}`}
+                className="w-64"
               />
-              <button className="rounded-xl border border-slate-300 px-5 py-2 text-sm font-medium text-slate-700 transition-all hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+              <Button type="submit" variant="secondary">
                 Add group
-              </button>
+              </Button>
             </form>
 
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <ListCard>
               {groups.length === 0 && (
-                <p className="px-5 py-8 text-sm text-slate-500 dark:text-slate-400">
-                  No groups — every roster covers the whole ward at once, which is
-                  fine until two kinds of staff need different rules.
-                </p>
+                <EmptyRow>
+                  No groups — every roster covers the whole ward at once, which is fine until
+                  two kinds of staff need different rules.
+                </EmptyRow>
               )}
               {groups.map((g) => (
                 <div
                   key={g.id}
-                  className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 last:border-0 dark:border-slate-800/50"
+                  className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
                 >
                   <div>
-                    <span className="font-medium text-slate-900 dark:text-white">{g.name}</span>
-                    <span className="ml-3 text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-medium text-zinc-900 dark:text-white">{g.name}</span>
+                    <span className="ml-3 text-xs text-zinc-500 dark:text-zinc-400">
                       {g.roles.length === 0
                         ? "no roles yet"
                         : g.roles.map((r) => r.name).join(", ")}
@@ -247,20 +241,17 @@ export default function RolesPage() {
                         ` · ${g._count.rosters} roster${g._count.rosters === 1 ? "" : "s"}`}
                     </span>
                   </div>
-                  <button
-                    onClick={() => deleteGroup(g.id, g.name)}
-                    className="text-xs font-medium text-slate-400 transition-colors hover:text-red-600 dark:hover:text-red-400"
-                  >
+                  <TextButton tone="danger" onClick={() => deleteGroup(g.id, g.name)}>
                     Delete
-                  </button>
+                  </TextButton>
                 </div>
               ))}
-            </div>
+            </ListCard>
 
             {groups.length > 0 && ungrouped.length > 0 && (
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Not in any group: {ungrouped.map((r) => r.name).join(", ")} — these
-                appear only in whole-ward rosters.
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Not in any group: {ungrouped.map((r) => r.name).join(", ")} — these appear only
+                in whole-ward rosters.
               </p>
             )}
           </section>

@@ -20,13 +20,13 @@ export function UserMenu() {
   }, []);
 
   if (isPending) {
-    return <div className="h-8 w-8 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />;
+    return <div className="h-8 w-8 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-800" />;
   }
   if (!session) {
     return (
       <Link
         href="/login"
-        className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+        className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
       >
         Sign in
       </Link>
@@ -39,25 +39,27 @@ export function UserMenu() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white dark:border-slate-900 bg-gradient-to-tr from-indigo-500 to-purple-500 text-sm font-semibold text-white shadow-sm"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white dark:border-zinc-900 bg-emerald-700 text-sm font-semibold text-white shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
         title={session.user.email}
       >
         {initial}
       </button>
       {open && (
-        <div className="absolute right-0 top-10 z-40 w-56 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl">
-          <div className="border-b border-slate-100 dark:border-slate-800 px-4 py-3">
-            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+        <div className="absolute right-0 top-10 z-40 w-56 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-xl shadow-zinc-900/10 dark:shadow-black/40">
+          <div className="border-b border-zinc-100 dark:border-zinc-800 px-4 py-3">
+            <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">
               {session.user.name}
             </p>
-            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+            <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
               {session.user.email}
             </p>
           </div>
           <Link
             href="/settings"
             onClick={() => setOpen(false)}
-            className="block px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+            className="block px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
           >
             Hospital settings
           </Link>
@@ -68,7 +70,7 @@ export function UserMenu() {
                 router.refresh();
               })
             }
-            className="block w-full px-4 py-2.5 text-left text-sm text-rose-600 dark:text-rose-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+            className="block w-full px-4 py-2.5 text-left text-sm text-rose-600 dark:text-rose-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
           >
             Sign out
           </button>

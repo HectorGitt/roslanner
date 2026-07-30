@@ -4,6 +4,20 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyRow,
+  Field,
+  Input,
+  ListCard,
+  LoadingState,
+  PageHeader,
+  Select,
+  TextButton,
+} from "@/components/ui";
 
 interface WardRow {
   id: string;
@@ -82,117 +96,96 @@ export default function RostersPage() {
     load();
   }
 
-  if (loading) return <p className="text-slate-500">Loading…</p>;
+  if (loading) return <LoadingState label="Loading rosters…" />;
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Rosters</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Generate a roster for a ward — the solver fills coverage while respecting rest
-          rules, leave and fairness.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Rosters"
+        description="Generate a roster for a ward — the solver fills coverage while respecting rest rules, leave and fairness."
+      />
 
-      <form
-        onSubmit={generate}
-        className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm"
-      >
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium text-slate-700 dark:text-slate-300">Ward</span>
-          <select
-            required
-            value={wardId}
-            onChange={(e) => {
-              setWardId(e.target.value);
-              // Adopt the ward's own cycle length as the starting period.
-              const w = wards.find((x) => x.id === e.target.value);
-              if (w) setDays(w.cycleLengthDays);
-            }}
-            className="w-52 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
-          >
-            <option value="">Select…</option>
-            {wards.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        {groups.length > 0 && (
-          <label className="block text-sm">
-            <span className="mb-1.5 block font-medium text-slate-700 dark:text-slate-300">
-              Covers
-            </span>
-            <select
-              value={groupId}
-              onChange={(e) => setGroupId(e.target.value)}
-              className="w-44 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
+      <Card className="p-5">
+        <form onSubmit={generate} className="flex flex-wrap items-end gap-4">
+          <Field label="Ward">
+            <Select
+              required
+              value={wardId}
+              onChange={(e) => {
+                setWardId(e.target.value);
+                // Adopt the ward's own cycle length as the starting period.
+                const w = wards.find((x) => x.id === e.target.value);
+                if (w) setDays(w.cycleLengthDays);
+              }}
+              className="w-52"
             >
-              <option value="">Everyone on the ward</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
+              <option value="">Select…</option>
+              {wards.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
                 </option>
               ))}
-            </select>
-          </label>
-        )}
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium text-slate-700 dark:text-slate-300">Start date</span>
-          <input
-            required
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm [color-scheme:light] dark:[color-scheme:dark]"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium text-slate-700 dark:text-slate-300">Days</span>
-          <input
-            type="number"
-            min={1}
-            max={62}
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="w-24 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
-          />
-        </label>
-        <button
-          disabled={generating}
-          className="rounded-xl bg-teal-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm shadow-teal-600/20 transition-all flex items-center gap-2"
-        >
-          {generating ? (
-            <>
-              <svg className="animate-spin -ml-1 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Solving…
-            </>
-          ) : "Generate roster"}
-        </button>
-      </form>
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+            </Select>
+          </Field>
+          {groups.length > 0 && (
+            <Field label="Covers">
+              <Select
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
+                className="w-44"
+              >
+                <option value="">Everyone on the ward</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+          <Field label="Start date">
+            <Input
+              required
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+          </Field>
+          <Field label="Days">
+            <Input
+              type="number"
+              min={1}
+              max={62}
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              className="w-24"
+            />
+          </Field>
+          <Button type="submit" loading={generating}>
+            {generating ? "Solving…" : "Generate roster"}
+          </Button>
+        </form>
+      </Card>
+      {error && <Alert tone="error">{error}</Alert>}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-        {rosters.length === 0 && (
-          <p className="px-5 py-8 text-center text-sm text-slate-500 dark:text-slate-400">No rosters yet.</p>
-        )}
+      <ListCard>
+        {rosters.length === 0 && <EmptyRow>No rosters yet.</EmptyRow>}
         {rosters.map((r) => (
           <div
             key={r.id}
-            className="group flex items-center justify-between border-b border-slate-100 dark:border-slate-800/50 px-5 py-4 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+            className="group flex items-center justify-between px-5 py-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
           >
-            <Link href={`/rosters/${r.id}`} className="flex-1 hover:text-teal-700 dark:hover:text-teal-400 transition-colors">
-              <span className="font-semibold text-slate-900 dark:text-white">{r.ward.name}</span>
+            <Link
+              href={`/rosters/${r.id}`}
+              className="flex-1 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 hover:text-emerald-700 dark:hover:text-emerald-400"
+            >
+              <span className="font-semibold text-zinc-900 dark:text-white">{r.ward.name}</span>
               {r.group && (
-                <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                <Badge tone="neutral" className="ml-2 font-medium">
                   {r.group.name}
-                </span>
+                </Badge>
               )}
-              <span className="ml-3 text-sm text-slate-500 dark:text-slate-400">
+              <span className="ml-3 text-sm text-zinc-500 dark:text-zinc-400">
                 {/* Calendar dates are stored as UTC midnight; render them as such
                     or they show a day early west of UTC. */}
                 {new Date(r.startDate).toLocaleDateString(undefined, { timeZone: "UTC" })}{" "}
@@ -200,25 +193,20 @@ export default function RostersPage() {
               </span>
             </Link>
             <div className="flex items-center gap-4">
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold tracking-wide ${
-                  r.status === "PUBLISHED"
-                    ? "bg-emerald-100/80 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
-                    : "bg-amber-100/80 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"
-                }`}
-              >
+              <Badge tone={r.status === "PUBLISHED" ? "success" : "warning"} className="tracking-wide">
                 {r.status}
-              </span>
-              <button
+              </Badge>
+              <TextButton
+                tone="danger"
                 onClick={() => remove(r.id)}
-                className="text-xs font-medium text-slate-400 hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 max-sm:opacity-100"
               >
                 Delete
-              </button>
+              </TextButton>
             </div>
           </div>
         ))}
-      </div>
+      </ListCard>
     </div>
   );
 }

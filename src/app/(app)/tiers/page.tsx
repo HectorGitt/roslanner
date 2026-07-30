@@ -2,6 +2,22 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  EmptyRow,
+  Field,
+  Input,
+  ListCard,
+  LoadingState,
+  PageHeader,
+  Select,
+  TextButton,
+  thClass,
+  theadRowClass,
+} from "@/components/ui";
 
 interface TierRow {
   id: string;
@@ -114,99 +130,79 @@ export default function TiersPage() {
     load();
   }
 
-  if (loading) return <p className="text-slate-500 dark:text-slate-400">Loading…</p>;
+  if (loading) return <LoadingState label="Loading tiers…" />;
 
   return (
     <div className="max-w-3xl space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Staff tiers</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          Your own staff hierarchy — e.g. Senior Executive, Core Clinical, Rotational, Support.
-          Shift eligibility and pairing rules below apply across every ward that uses
-          the shift, so you only set them once.
-        </p>
-      </div>
+      <PageHeader
+        title="Staff tiers"
+        description="Your own staff hierarchy — e.g. Senior Executive, Core Clinical, Rotational, Support. Shift eligibility and pairing rules below apply across every ward that uses the shift, so you only set them once."
+      />
 
-      <form
-        onSubmit={addTier}
-        className="flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm"
-      >
-        <label className="block text-sm">
-          <span className="mb-1 block font-medium text-slate-900 dark:text-white">Name</span>
-          <input
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Nurse Intern"
-            className="w-52 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block font-medium text-slate-900 dark:text-white">Rank</span>
-          <input
-            type="number"
-            value={rank}
-            onChange={(e) => setRank(Number(e.target.value))}
-            className="w-20 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block font-medium text-slate-900 dark:text-white">Max consecutive nights</span>
-          <input
-            type="number"
-            min={0}
-            value={maxNights}
-            onChange={(e) => setMaxNights(e.target.value)}
-            placeholder="ward default"
-            className="w-32 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500"
-          />
-        </label>
-        <label className="flex items-center gap-2 pb-2.5 text-sm">
-          <input
-            type="checkbox"
-            checked={countsTowardClinicalCoverage}
-            onChange={(e) => setCounts(e.target.checked)}
-            className="h-4 w-4 accent-teal-600"
-          />
-          <span
-            className="font-medium text-slate-900 dark:text-white"
-            title="Uncheck for support staff (porters, attendants). Applies to tier-scoped coverage rules; role-based coverage is already role-specific."
-          >
-            Counts toward clinical coverage
-          </span>
-        </label>
-        <button className="rounded-xl bg-teal-600 px-5 py-2 text-sm font-medium text-white hover:bg-teal-700 shadow-sm shadow-teal-600/20">
-          Add tier
-        </button>
-      </form>
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      <Card className="p-5">
+        <form onSubmit={addTier} className="flex flex-wrap items-end gap-3">
+          <Field label="Name">
+            <Input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Nurse Intern"
+              className="w-52"
+            />
+          </Field>
+          <Field label="Rank">
+            <Input
+              type="number"
+              value={rank}
+              onChange={(e) => setRank(Number(e.target.value))}
+              className="w-20"
+            />
+          </Field>
+          <Field label="Max consecutive nights">
+            <Input
+              type="number"
+              min={0}
+              value={maxNights}
+              onChange={(e) => setMaxNights(e.target.value)}
+              placeholder="ward default"
+              className="w-36"
+            />
+          </Field>
+          <label className="flex items-center gap-2 pb-2.5 text-sm">
+            <Checkbox
+              checked={countsTowardClinicalCoverage}
+              onChange={(e) => setCounts(e.target.checked)}
+            />
+            <span
+              className="font-medium text-zinc-700 dark:text-zinc-300"
+              title="Uncheck for support staff (porters, attendants). Applies to tier-scoped coverage rules; role-based coverage is already role-specific."
+            >
+              Counts toward clinical coverage
+            </span>
+          </label>
+          <Button type="submit">Add tier</Button>
+        </form>
+      </Card>
+      {error && <Alert tone="error">{error}</Alert>}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-        {tiers.length === 0 && (
-          <p className="px-5 py-8 text-center text-sm text-slate-500 dark:text-slate-400">No tiers yet.</p>
-        )}
+      <ListCard>
+        {tiers.length === 0 && <EmptyRow>No tiers yet.</EmptyRow>}
         {tiers.map((t) => (
-          <div
-            key={t.id}
-            className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/50 px-5 py-4 last:border-0"
-          >
+          <div key={t.id} className="flex items-center justify-between px-5 py-4">
             <div>
-              <span className="font-medium text-slate-900 dark:text-white">{t.name}</span>
-              <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+              <span className="font-medium text-zinc-900 dark:text-white">{t.name}</span>
+              <span className="ml-2 text-xs text-zinc-500 dark:text-zinc-400">
                 rank {t.rank} · {t._count.staff} staff
                 {!t.countsTowardClinicalCoverage && " · non-clinical"}
                 {t.maxConsecutiveNights !== null && ` · max ${t.maxConsecutiveNights} consecutive nights`}
               </span>
             </div>
-            <button
-              onClick={() => deleteTier(t.id)}
-              className="text-xs text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-            >
+            <TextButton tone="danger" onClick={() => deleteTier(t.id)}>
               Delete
-            </button>
+            </TextButton>
           </div>
         ))}
-      </div>
+      </ListCard>
 
       {tiers.length > 0 && shifts.length > 0 && (
         <EligibilityMatrix
@@ -220,83 +216,74 @@ export default function TiersPage() {
           }}
         />
       )}
-      {notice && <p className="text-sm text-emerald-600 dark:text-emerald-400">{notice}</p>}
+      {notice && <Alert tone="success">{notice}</Alert>}
 
       <div>
-        <h2 className="mb-1 text-lg font-semibold text-slate-900 dark:text-white">Pairing rules</h2>
-        <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+        <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-white">Pairing rules</h2>
+        <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
           E.g. &quot;whenever a Nurse Intern is on shift, at least 1 Core Clinical staffer must also be
           on it&quot; — applies to every shift, in every ward.
         </p>
         {tiers.length < 2 ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">Add at least two tiers to create a pairing rule.</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Add at least two tiers to create a pairing rule.
+          </p>
         ) : (
-          <form onSubmit={addPairing} className="flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium text-slate-900 dark:text-white">When this tier works…</span>
-              <select
-                required
-                value={dependentTierId}
-                onChange={(e) => setDependentTierId(e.target.value)}
-                className="w-48 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
-              >
-                <option value="">Select…</option>
-                {tiers.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium text-slate-900 dark:text-white">…require at least</span>
-              <input
-                type="number"
-                min={1}
-                value={minRequiredCount}
-                onChange={(e) => setMinRequiredCount(Number(e.target.value))}
-                className="w-20 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium text-slate-900 dark:text-white">of this tier present</span>
-              <select
-                required
-                value={requiredTierId}
-                onChange={(e) => setRequiredTierId(e.target.value)}
-                className="w-48 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
-              >
-                <option value="">Select…</option>
-                {tiers.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </label>
-            <button className="rounded-xl bg-teal-600 px-5 py-2 text-sm font-medium text-white hover:bg-teal-700 shadow-sm shadow-teal-600/20">
-              Add rule
-            </button>
-          </form>
+          <Card className="p-5">
+            <form onSubmit={addPairing} className="flex flex-wrap items-end gap-3">
+              <Field label="When this tier works…">
+                <Select
+                  required
+                  value={dependentTierId}
+                  onChange={(e) => setDependentTierId(e.target.value)}
+                  className="w-48"
+                >
+                  <option value="">Select…</option>
+                  {tiers.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="…require at least">
+                <Input
+                  type="number"
+                  min={1}
+                  value={minRequiredCount}
+                  onChange={(e) => setMinRequiredCount(Number(e.target.value))}
+                  className="w-20"
+                />
+              </Field>
+              <Field label="of this tier present">
+                <Select
+                  required
+                  value={requiredTierId}
+                  onChange={(e) => setRequiredTierId(e.target.value)}
+                  className="w-48"
+                >
+                  <option value="">Select…</option>
+                  {tiers.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Button type="submit">Add rule</Button>
+            </form>
+          </Card>
         )}
 
-        <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-          {pairings.length === 0 && (
-            <p className="px-5 py-6 text-center text-sm text-slate-500 dark:text-slate-400">No pairing rules yet.</p>
-          )}
+        <ListCard className="mt-3">
+          {pairings.length === 0 && <EmptyRow>No pairing rules yet.</EmptyRow>}
           {pairings.map((p) => (
-            <div
-              key={p.id}
-              className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/50 px-5 py-3 last:border-0 text-sm"
-            >
-              <span className="text-slate-900 dark:text-white">
+            <div key={p.id} className="flex items-center justify-between px-5 py-3 text-sm">
+              <span className="text-zinc-900 dark:text-white">
                 {p.dependentTier.name} always needs &ge;{p.minRequiredCount} {p.requiredTier.name}
               </span>
-              <button
-                onClick={() => deletePairing(p.id)}
-                className="text-xs text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-              >
+              <TextButton tone="danger" onClick={() => deletePairing(p.id)}>
                 Delete
-              </button>
+              </TextButton>
             </div>
           ))}
-        </div>
+        </ListCard>
       </div>
     </div>
   );
@@ -362,10 +349,10 @@ function EligibilityMatrix({
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="mb-1 text-lg font-semibold text-slate-900 dark:text-white">
+        <h2 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-white">
           Shift eligibility
         </h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
           Which shifts each tier may work. Uncheck a shift to bar the tier from it (e.g.
           senior staff on mornings only); uncheck{" "}
           <span className="font-medium">Weekends</span> or{" "}
@@ -373,75 +360,65 @@ function EligibilityMatrix({
           entirely.
         </p>
       </div>
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+      <Card className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-left text-slate-700 dark:text-slate-300">
-              <th className="px-5 py-3 font-medium">Tier</th>
+            <tr className={theadRowClass}>
+              <th className={`${thClass} px-5`}>Tier</th>
               {shifts.map((s) => (
-                <th key={s.code} className="px-5 py-3 font-medium">
+                <th key={s.code} className={`${thClass} px-5`}>
                   {s.label}
                 </th>
               ))}
-              <th className="px-5 py-3 font-medium">Weekends</th>
-              <th className="px-5 py-3 font-medium">Holidays</th>
+              <th className={`${thClass} px-5`}>Weekends</th>
+              <th className={`${thClass} px-5`}>Holidays</th>
             </tr>
           </thead>
           <tbody>
             {tiers.map((t) => (
               <tr
                 key={t.id}
-                className="border-b border-slate-100 dark:border-slate-800/50 last:border-0"
+                className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/50"
               >
-                <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">
+                <td className="px-5 py-3 font-medium text-zinc-900 dark:text-white">
                   {t.name}
                 </td>
                 {shifts.map((s) => (
                   <td key={s.code} className="px-5 py-3">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={get(t.id, s.code).eligible}
                       onChange={(e) => set(t.id, s.code, { eligible: e.target.checked })}
-                      className="h-4 w-4 accent-teal-600"
                     />
                   </td>
                 ))}
                 <td className="px-5 py-3">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={shifts.every((s) => get(t.id, s.code).weekendEligible)}
                     onChange={(e) =>
                       shifts.forEach((s) =>
                         set(t.id, s.code, { weekendEligible: e.target.checked }),
                       )
                     }
-                    className="h-4 w-4 accent-teal-600"
                   />
                 </td>
                 <td className="px-5 py-3">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={shifts.every((s) => get(t.id, s.code).holidayEligible)}
                     onChange={(e) =>
                       shifts.forEach((s) =>
                         set(t.id, s.code, { holidayEligible: e.target.checked }),
                       )
                     }
-                    className="h-4 w-4 accent-teal-600"
                   />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-      <button
-        onClick={save}
-        disabled={saving}
-        className="rounded-xl bg-teal-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm shadow-teal-600/20"
-      >
+      </Card>
+      <Button onClick={save} loading={saving}>
         {saving ? "Saving…" : "Save shift eligibility"}
-      </button>
+      </Button>
     </div>
   );
 }

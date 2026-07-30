@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { Alert, Badge, Button, Card, LoadingState } from "@/components/ui";
 import { evaluate, isWeekend } from "@/lib/roster/engine";
 import {
   buildShiftStyles,
@@ -133,8 +134,8 @@ export default function RosterPage() {
     return m;
   }, [data]);
 
-  if (error) return <p className="text-red-600">{error}</p>;
-  if (!data || !evaluation) return <p className="text-slate-500">Loading…</p>;
+  if (error) return <Alert tone="error">{error}</Alert>;
+  if (!data || !evaluation) return <LoadingState label="Loading roster…" />;
 
   function cycleCell(sIdx: number, d: number) {
     if (cycle.length === 0) return;
@@ -263,65 +264,53 @@ export default function RosterPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Link href="/rosters" className="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors print:hidden">
+          <Link href="/rosters" className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors print:hidden">
             &larr; All rosters
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">
+          <h1 className="mt-1 text-2xl font-bold text-zinc-900 dark:text-white">
             {data.ward.name}{" "}
-            <span className="font-normal text-slate-500 dark:text-slate-400">
+            <span className="font-normal text-zinc-500 dark:text-zinc-400">
               &middot; {new Date(data.startDate + "T00:00:00").toLocaleDateString()} &middot; {data.days}{" "}
               days &middot; {grid.reduce((acc, row) => acc + row.filter(v => v !== "DO").length, 0)} shifts
             </span>
           </h1>
         </div>
-        <div className="flex items-center gap-2 print:hidden">
-          <button
-            onClick={() => window.print()}
-            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-2"
-            title="Print roster"
-          >
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
+          <Button variant="secondary" onClick={() => window.print()} title="Print roster" className="px-4 py-2">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
             <span className="hidden sm:inline">Print</span>
-          </button>
-          <button
-            onClick={exportCsv}
-            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-2"
-            title="Export as CSV"
-          >
+          </Button>
+          <Button variant="secondary" onClick={exportCsv} title="Export as CSV" className="px-4 py-2">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
             <span className="hidden sm:inline">Export</span>
-          </button>
+          </Button>
           {data.status === "DRAFT" && dirty.size === 0 && (
             <button
               onClick={reoptimize}
               disabled={saving}
-              className="rounded-xl border border-teal-300 dark:border-teal-700 bg-teal-50 dark:bg-teal-900/20 px-4 py-2 text-sm font-medium text-teal-700 dark:text-teal-400 hover:bg-teal-100 dark:hover:bg-teal-900/40 disabled:opacity-50 transition-colors flex items-center gap-2"
               title="Re-run AI solver"
+              className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
               <span className="hidden sm:inline">Re-optimize</span>
             </button>
           )}
           {dirty.size > 0 && (
-            <button
-              onClick={save}
-              disabled={saving}
-              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
-            >
+            <Button onClick={save} loading={saving} className="px-4 py-2">
               {saving ? "Saving…" : `Save ${dirty.size} change${dirty.size === 1 ? "" : "s"}`}
-            </button>
+            </Button>
           )}
           {data.status === "DRAFT" ? (
             <button
               onClick={() => setStatus("PUBLISHED")}
-              className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+              className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40"
             >
               Publish
             </button>
           ) : (
             <button
               onClick={() => setStatus("DRAFT")}
-              className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100"
+              className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40"
             >
               Unpublish
             </button>
@@ -329,16 +318,16 @@ export default function RosterPage() {
         </div>
       </div>
 
-      {error && <p className="text-sm text-red-600 print:hidden">{error}</p>}
+      {error && <Alert tone="error" className="print:hidden">{error}</Alert>}
 
-      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-slate-400 print:hidden">
+      <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-600 dark:text-zinc-400 print:hidden">
         {data.shiftDefs.map((sd) => {
           const style = shiftStyles.get(sd.code)!;
           return (
             <span key={sd.code} className="flex items-center gap-1.5">
               <i className={`inline-block h-4 w-4 rounded border ${style.className}`} />
               {sd.label}
-              <span className="text-slate-400 dark:text-slate-600">
+              <span className="text-zinc-400 dark:text-zinc-600">
                 {formatShiftTime(sd.startMinutes)}–{formatShiftTime(sd.endMinutes)}
               </span>
             </span>
@@ -348,12 +337,12 @@ export default function RosterPage() {
           <i className={`inline-block h-4 w-4 rounded border ${DAY_OFF_STYLE}`} />
           Day off
         </span>
-        <span className="text-slate-400 dark:text-slate-600">·</span>
+        <span className="text-zinc-400 dark:text-zinc-600">·</span>
         <span>
           Click a cell to cycle{" "}
           {[...data.shiftDefs.map((sd) => sd.label), "off"].join(" → ")}
         </span>
-        <span className="text-slate-400 dark:text-slate-600">·</span>
+        <span className="text-zinc-400 dark:text-zinc-600">·</span>
         <span>
           <b className="text-rose-600 dark:text-rose-400">L</b> leave &nbsp;
           <b className="text-sky-600 dark:text-sky-400">R</b> day-off request
@@ -366,24 +355,24 @@ export default function RosterPage() {
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+      <Card className="overflow-x-auto">
         <table className="border-separate border-spacing-0 text-xs w-full">
           <thead>
             <tr>
-              <th className="sticky left-0 z-10 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-2 text-left font-medium text-slate-900 dark:text-white">
+              <th className="sticky left-0 z-10 border-b border-zinc-200 bg-white px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
                 Staff
               </th>
               {dayHeaders.map((h) => (
                 <th
                   key={h.d}
                   title={h.holiday ? "Public holiday" : undefined}
-                  className={`border-b border-slate-200 dark:border-slate-800 px-1 py-2 text-center font-medium ${
+                  className={`border-b border-zinc-200 dark:border-zinc-800 px-1 py-2 text-center font-medium ${
                     h.holiday
                       ? "bg-amber-50 dark:bg-amber-500/10"
                       : h.weekend
-                        ? "bg-slate-100 dark:bg-slate-800/50"
-                        : "bg-white dark:bg-slate-900"
-                  } ${shortDays.has(h.d) ? "text-rose-600 dark:text-rose-400" : "text-slate-600 dark:text-slate-400"}`}
+                        ? "bg-zinc-100 dark:bg-zinc-800/50"
+                        : "bg-white dark:bg-zinc-900"
+                  } ${shortDays.has(h.d) ? "text-rose-600 dark:text-rose-400" : "text-zinc-600 dark:text-zinc-400"}`}
                 >
                   <div>{h.dow}</div>
                   <div className="text-sm">{h.num}</div>
@@ -396,7 +385,7 @@ export default function RosterPage() {
                 </th>
               ))}
               <th
-                className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2 py-2 text-center font-medium text-slate-500 dark:text-slate-400"
+                className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2 py-2 text-center font-medium text-zinc-500 dark:text-zinc-400"
                 title={data.shiftDefs.map((sd) => sd.label).join(" / ")}
               >
                 {tallyHeader}
@@ -422,26 +411,20 @@ export default function RosterPage() {
             ))}
           </tbody>
         </table>
-      </div>
+      </Card>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+        <Card className="p-5">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-white">
             Hard violations
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-xs ${
-                hard.length === 0
-                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
-                  : "bg-rose-100 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400"
-              }`}
-            >
+            <Badge tone={hard.length === 0 ? "success" : "danger"} className="font-medium">
               {hard.length}
-            </span>
+            </Badge>
           </h2>
           {hard.length === 0 ? (
             <p className="text-sm text-emerald-700 dark:text-emerald-400">All hard constraints satisfied ✓</p>
           ) : (
-            <ul className="max-h-56 space-y-1.5 overflow-y-auto text-sm text-slate-700 dark:text-slate-300">
+            <ul className="max-h-56 space-y-1.5 overflow-y-auto text-sm text-zinc-700 dark:text-zinc-300">
               {hard.map((v, i) => (
                 <li key={i} className="flex gap-2">
                   <span className="text-rose-500 dark:text-rose-400">•</span>
@@ -450,18 +433,18 @@ export default function RosterPage() {
               ))}
             </ul>
           )}
-        </section>
-        <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+        </Card>
+        <Card className="p-5">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-white">
             Warnings & fairness
-            <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-xs text-slate-600 dark:text-slate-400">
+            <Badge tone="neutral" className="font-medium">
               {soft.length}
-            </span>
+            </Badge>
           </h2>
           {soft.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No warnings or unfair distributions.</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">No warnings or unfair distributions.</p>
           ) : (
-            <ul className="max-h-56 space-y-1.5 overflow-y-auto text-sm text-slate-700 dark:text-slate-300">
+            <ul className="max-h-56 space-y-1.5 overflow-y-auto text-sm text-zinc-700 dark:text-zinc-300">
               {soft.map((v, i) => (
                 <li key={i} className="flex gap-2">
                   <span className="text-sky-500 dark:text-sky-400">•</span>
@@ -470,15 +453,15 @@ export default function RosterPage() {
               ))}
             </ul>
           )}
-          <div className="mt-4 border-t border-slate-100 dark:border-slate-800/50 pt-3 space-y-1.5">
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Fairness spread (lower is more even): <span className="font-medium text-slate-900 dark:text-white">{evaluation.fairnessCost.toFixed(1)}</span>
+          <div className="mt-4 border-t border-zinc-100 dark:border-zinc-800/50 pt-3 space-y-1.5">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Fairness spread (lower is more even): <span className="font-medium text-zinc-900 dark:text-white">{evaluation.fairnessCost.toFixed(1)}</span>
             </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Total evaluation cost (lower is better): <span className="font-medium text-slate-900 dark:text-white">{evaluation.cost.toFixed(1)}</span>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Total evaluation cost (lower is better): <span className="font-medium text-zinc-900 dark:text-white">{evaluation.cost.toFixed(1)}</span>
             </p>
           </div>
-        </section>
+        </Card>
       </div>
     </div>
   );
@@ -523,7 +506,7 @@ function GroupRows({
       <tr>
         <td
           colSpan={days + 2}
-          className="sticky left-0 border-b border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-800/50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+          className="sticky left-0 border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50 dark:bg-zinc-800/50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
         >
           {group.roleName}
         </td>
@@ -531,13 +514,13 @@ function GroupRows({
       {group.rows.map(({ staff, idx }) => {
         const row = grid[idx];
         return (
-          <tr key={staff.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
-            <td className="sticky left-0 z-10 max-w-40 truncate border-b border-slate-100 dark:border-slate-800/50 bg-white dark:bg-slate-900 px-3 py-1.5 font-medium text-slate-900 dark:text-white">
+          <tr key={staff.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/20 transition-colors">
+            <td className="sticky left-0 z-10 max-w-40 truncate border-b border-zinc-100 dark:border-zinc-800/50 bg-white dark:bg-zinc-900 px-3 py-1.5 font-medium text-zinc-900 dark:text-white">
               {staff.name}
               {floatStaffIds.has(staff.id) && (
                 <span
                   title="Based in another ward — floated in"
-                  className="ml-1.5 rounded bg-violet-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                  className="ml-1.5 rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
                 >
                   float
                 </span>
@@ -550,8 +533,8 @@ function GroupRows({
               return (
                 <td
                   key={d}
-                  className={`border-b border-slate-100 dark:border-slate-800/50 p-0.5 ${
-                    dayHeaders[d].weekend ? "bg-slate-50 dark:bg-slate-800/20" : ""
+                  className={`border-b border-zinc-100 dark:border-zinc-800/50 p-0.5 ${
+                    dayHeaders[d].weekend ? "bg-zinc-50 dark:bg-zinc-800/20" : ""
                   }`}
                 >
                   <button
@@ -559,7 +542,7 @@ function GroupRows({
                     title={`${staff.name} — day ${d + 1}: ${style.label}${
                       off === "hard" ? " (on leave)" : off === "soft" ? " (requested off)" : ""
                     }`}
-                    className={`relative flex h-8 w-8 items-center justify-center rounded border text-[11px] font-semibold transition ${style.className} ${
+                    className={`relative flex h-8 w-8 items-center justify-center rounded border text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${style.className} ${
                       bad ? "ring-2 ring-rose-500" : "hover:scale-105"
                     }`}
                   >
@@ -567,7 +550,7 @@ function GroupRows({
                     {leadCells.has(`${staff.id}|${d}`) && (
                       <span
                         title="In charge of this shift"
-                        className="absolute -bottom-0.5 -left-0.5 h-2 w-2 rounded-full bg-amber-500 ring-1 ring-white dark:ring-slate-900"
+                        className="absolute -bottom-0.5 -left-0.5 h-2 w-2 rounded-full bg-amber-500 ring-1 ring-white dark:ring-zinc-900"
                       />
                     )}
                     {off && (
@@ -583,7 +566,7 @@ function GroupRows({
                 </td>
               );
             })}
-            <td className="border-b border-slate-100 dark:border-slate-800/50 px-2 text-center text-slate-500 dark:text-slate-400">
+            <td className="border-b border-zinc-100 dark:border-zinc-800/50 px-2 text-center text-zinc-500 dark:text-zinc-400">
               {tally(row).join("/")}
             </td>
           </tr>

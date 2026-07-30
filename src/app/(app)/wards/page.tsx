@@ -3,6 +3,18 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import {
+  Alert,
+  Button,
+  ButtonLink,
+  Card,
+  EmptyState,
+  Input,
+  LoadingState,
+  PageHeader,
+  Select,
+  TextButton,
+} from "@/components/ui";
 
 interface WardRow {
   id: string;
@@ -60,79 +72,84 @@ export default function WardsPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Wards</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Each ward has its own staff, coverage requirements and rules.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Wards"
+        description="Each ward has its own staff, coverage requirements and rules."
+      />
 
-      <form onSubmit={createWard} className="space-y-2">
-        <div className="flex flex-wrap gap-3">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Paediatrics, ICU, Surgical Ward A"
-            className="w-80 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
-          />
-          <select
-            value={preset}
-            onChange={(e) => setPreset(e.target.value)}
-            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-sm text-slate-900 dark:text-white shadow-sm"
-          >
-            {presets.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.category}
-              </option>
-            ))}
-          </select>
-          <button className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700 shadow-sm shadow-teal-600/20 transition-all">
-            Add ward
-          </button>
-        </div>
-        {chosen && (
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {chosen.description} — {chosen.shifts.map((s) => s.label).join(", ")} ·{" "}
-            {chosen.cycleLengthDays}-day cycle. All editable afterwards.
-          </p>
-        )}
-      </form>
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      <Card className="p-5">
+        <form onSubmit={createWard} className="space-y-2">
+          <div className="flex flex-wrap gap-3">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Paediatrics, ICU, Surgical Ward A"
+              className="w-80"
+            />
+            <Select value={preset} onChange={(e) => setPreset(e.target.value)}>
+              {presets.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.category}
+                </option>
+              ))}
+            </Select>
+            <Button type="submit">Add ward</Button>
+          </div>
+          {chosen && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {chosen.description} — {chosen.shifts.map((s) => s.label).join(", ")} ·{" "}
+              {chosen.cycleLengthDays}-day cycle. All editable afterwards.
+            </p>
+          )}
+        </form>
+      </Card>
+      {error && <Alert tone="error">{error}</Alert>}
 
       {loading ? (
-        <p className="text-slate-500 dark:text-slate-400">Loading…</p>
+        <LoadingState label="Loading wards…" />
+      ) : wards.length === 0 ? (
+        <EmptyState
+          icon={
+            <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+          }
+          title="No wards yet"
+          description="Create your first ward above — pick a preset to start with sensible shifts, then fine-tune everything."
+        />
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {wards.map((w) => (
-            <div
+            <Card
               key={w.id}
-              className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm hover:shadow-lg hover:border-teal-200 dark:hover:border-teal-900/50 transition-all"
+              className="group p-5 transition-all hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-500/5 dark:hover:border-emerald-900/50"
             >
               <div className="flex items-start justify-between">
-                <Link href={`/wards/${w.id}`} className="font-semibold text-lg text-slate-900 dark:text-white group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
+                <Link
+                  href={`/wards/${w.id}`}
+                  className="rounded text-lg font-semibold text-zinc-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 group-hover:text-emerald-600 dark:text-white dark:group-hover:text-emerald-400"
+                >
                   {w.name}
                 </Link>
-                <button
+                <TextButton
+                  tone="danger"
                   onClick={() => deleteWard(w.id, w.name)}
-                  className="text-xs font-medium text-slate-400 hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 max-sm:opacity-100"
                 >
                   Delete
-                </button>
+                </TextButton>
               </div>
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+              <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
                 {w._count.staff} staff · {w._count.rosters} roster{w._count.rosters === 1 ? "" : "s"}
               </p>
-              <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">
+              <p className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
                 {w.category} · {w.cycleLengthDays}-day cycle
               </p>
-              <Link
-                href={`/wards/${w.id}`}
-                className="mt-4 inline-block rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-teal-50 hover:text-teal-700 dark:hover:bg-teal-900/30 dark:hover:text-teal-300 transition-colors"
-              >
+              <ButtonLink href={`/wards/${w.id}`} variant="secondary" size="sm" className="mt-4">
                 Configure <span aria-hidden="true">&rarr;</span>
-              </Link>
-            </div>
+              </ButtonLink>
+            </Card>
           ))}
         </div>
       )}

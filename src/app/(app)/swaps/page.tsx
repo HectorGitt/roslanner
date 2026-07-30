@@ -3,6 +3,19 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  LoadingState,
+  PageHeader,
+  Select,
+  TextButton,
+  inputSmClass,
+} from "@/components/ui";
 
 interface AssignmentRef {
   id: string;
@@ -36,13 +49,13 @@ interface RosterDetail {
   grid: string[][];
 }
 
-const STATUS_STYLE: Record<string, string> = {
-  PENDING_ACCEPT: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  PENDING_APPROVAL: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300",
-  HARD_RULE_REJECTED: "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300",
-  DECLINED: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
-  APPROVED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
-  CANCELLED: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+const STATUS_TONE: Record<string, "neutral" | "warning" | "danger" | "success"> = {
+  PENDING_ACCEPT: "neutral",
+  PENDING_APPROVAL: "warning",
+  HARD_RULE_REJECTED: "danger",
+  DECLINED: "neutral",
+  APPROVED: "success",
+  CANCELLED: "neutral",
 };
 const STATUS_LABEL: Record<string, string> = {
   PENDING_ACCEPT: "waiting for an offer",
@@ -196,105 +209,93 @@ export default function SwapsPage() {
     }
   }
 
-  if (loading) return <p className="text-slate-500 dark:text-slate-400">Loading…</p>;
+  if (loading) return <LoadingState label="Loading swaps…" />;
 
   return (
-    <div className="max-w-4xl space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Shift swaps</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          One person offers a shift, another offers one back, and the exchange is checked
-          against the same rules the roster was built with. Anything that would break a
-          hard rule is turned away before it reaches you; the rest waits for your approval.
-        </p>
-      </div>
+    <div className="max-w-4xl space-y-6">
+      <PageHeader
+        title="Shift swaps"
+        description="One person offers a shift, another offers one back, and the exchange is checked against the same rules the roster was built with. Anything that would break a hard rule is turned away before it reaches you; the rest waits for your approval."
+      />
 
-      <form
-        onSubmit={raise}
-        className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm"
-      >
-        <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Offer a shift</h2>
-        <div className="flex flex-wrap items-end gap-3 text-sm">
-          <label className="block">
-            <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">Roster</span>
-            <select
-              required
-              value={rosterId}
-              onChange={(e) => setRosterId(e.target.value)}
-              className="w-56 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-white"
-            >
-              <option value="">Select…</option>
-              {rosters.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.ward.name} · {new Date(r.startDate).toLocaleDateString()} ({r.status.toLowerCase()})
-                </option>
-              ))}
-            </select>
-          </label>
-          {detail && (
-            <>
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">Who</span>
-                <select
-                  value={offeredStaff}
-                  onChange={(e) => setOfferedStaff(e.target.value)}
-                  className="w-48 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-white"
-                >
-                  {detail.staff.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">Day</span>
-                <select
-                  value={offeredDay}
-                  onChange={(e) => setOfferedDay(Number(e.target.value))}
-                  className="w-56 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-white"
-                >
-                  {Array.from({ length: detail.days }, (_, d) => (
-                    <option key={d} value={d}>
-                      {dateOf(detail.startDate, d)} — {shiftName(cellOf(offeredStaff, d))}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">Note</span>
-                <input
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="optional"
-                  className="w-40 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-white"
-                />
-              </label>
-              <button className="rounded-xl bg-teal-600 px-5 py-2 font-medium text-white hover:bg-teal-700">
-                Offer
-              </button>
-            </>
-          )}
-        </div>
-      </form>
+      <Card className="p-5">
+        <form onSubmit={raise} className="space-y-3">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Offer a shift</h2>
+          <div className="flex flex-wrap items-end gap-3 text-sm">
+            <Field label="Roster">
+              <Select
+                required
+                value={rosterId}
+                onChange={(e) => setRosterId(e.target.value)}
+                className="w-56"
+              >
+                <option value="">Select…</option>
+                {rosters.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.ward.name} · {new Date(r.startDate).toLocaleDateString()} ({r.status.toLowerCase()})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {detail && (
+              <>
+                <Field label="Who">
+                  <Select
+                    value={offeredStaff}
+                    onChange={(e) => setOfferedStaff(e.target.value)}
+                    className="w-48"
+                  >
+                    {detail.staff.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Day">
+                  <Select
+                    value={offeredDay}
+                    onChange={(e) => setOfferedDay(Number(e.target.value))}
+                    className="w-56"
+                  >
+                    {Array.from({ length: detail.days }, (_, d) => (
+                      <option key={d} value={d}>
+                        {dateOf(detail.startDate, d)} — {shiftName(cellOf(offeredStaff, d))}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Note">
+                  <Input
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="optional"
+                    className="w-40"
+                  />
+                </Field>
+                <Button type="submit">Offer</Button>
+              </>
+            )}
+          </div>
+        </form>
+      </Card>
 
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-      {notice && <p className="text-sm text-emerald-600 dark:text-emerald-400">{notice}</p>}
+      {error && <Alert tone="error">{error}</Alert>}
+      {notice && <Alert tone="success">{notice}</Alert>}
 
       <div className="space-y-3">
         {swaps.length === 0 && (
-          <p className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-5 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
-            No swaps yet.
-          </p>
+          <Card>
+            <p className="px-5 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
+              No swaps yet.
+            </p>
+          </Card>
         )}
         {swaps.map((s) => (
-          <div
-            key={s.id}
-            className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm"
-          >
+          <Card key={s.id} className="p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="text-sm">
-                <p className="font-medium text-slate-900 dark:text-white">
+                <p className="font-medium text-zinc-900 dark:text-white">
                   {s.requestingAssignment.staff.name} offers{" "}
                   {dateOf(s.roster.startDate, s.requestingAssignment.dayIndex)} (
                   {s.requestingAssignment.shift === "DO" ? "off" : s.requestingAssignment.shift})
@@ -307,8 +308,11 @@ export default function SwapsPage() {
                     </>
                   )}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  <Link href={`/rosters/${s.roster.id}`} className="underline hover:text-slate-700 dark:hover:text-slate-300">
+                <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                  <Link
+                    href={`/rosters/${s.roster.id}`}
+                    className="underline hover:text-zinc-700 dark:hover:text-zinc-300"
+                  >
                     {s.roster.ward.name}
                   </Link>
                   {s.note ? ` · ${s.note}` : ""}
@@ -321,11 +325,9 @@ export default function SwapsPage() {
                   </ul>
                 ) : null}
               </div>
-              <span
-                className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLE[s.status]}`}
-              >
+              <Badge tone={STATUS_TONE[s.status] ?? "neutral"} className="shrink-0 font-medium">
                 {STATUS_LABEL[s.status] ?? s.status}
-              </span>
+              </Badge>
             </div>
 
             <div className="mt-3 flex flex-wrap items-end gap-3 text-xs">
@@ -342,43 +344,32 @@ export default function SwapsPage() {
                       setDay={setAcceptDay}
                     />
                   ) : (
-                    <button
+                    <Button
+                      size="sm"
                       onClick={() => {
                         setAcceptingFor(s);
                         setAcceptStaff("");
                         setAcceptDay(0);
                       }}
-                      className="rounded-lg bg-teal-600 px-3 py-1.5 font-medium text-white hover:bg-teal-700"
                     >
                       Offer a shift in exchange
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    onClick={() => act(s, "cancel")}
-                    className="text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-                  >
+                  <TextButton tone="danger" onClick={() => act(s, "cancel")}>
                     Cancel
-                  </button>
+                  </TextButton>
                 </>
               )}
               {s.status === "PENDING_APPROVAL" && (
                 <>
-                  <button
-                    onClick={() => act(s, "approve")}
-                    className="rounded-lg bg-emerald-600 px-3 py-1.5 font-medium text-white hover:bg-emerald-700"
-                  >
+                  <Button size="sm" variant="success" onClick={() => act(s, "approve")}>
                     Approve and apply
-                  </button>
-                  <button
-                    onClick={() => act(s, "decline")}
-                    className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
-                  >
-                    Decline
-                  </button>
+                  </Button>
+                  <TextButton onClick={() => act(s, "decline")}>Decline</TextButton>
                 </>
               )}
             </div>
-          </div>
+          </Card>
         ))}
       </div>
     </div>
@@ -413,7 +404,7 @@ function AcceptForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [swap.roster.id]);
 
-  if (!roster) return <span className="text-slate-400">Loading roster…</span>;
+  if (!roster) return <span className="text-zinc-400">Loading roster…</span>;
 
   const rowOf = roster.staff.findIndex((s) => s.id === staffId);
   const cell = rowOf < 0 ? "" : roster.grid[rowOf][day];
@@ -435,7 +426,7 @@ function AcceptForm({
       <select
         value={staffId}
         onChange={(e) => setStaffId(e.target.value)}
-        className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-slate-900 dark:text-white"
+        className={inputSmClass}
       >
         {roster.staff.map((s) => (
           <option key={s.id} value={s.id}>
@@ -446,7 +437,7 @@ function AcceptForm({
       <select
         value={day}
         onChange={(e) => setDay(Number(e.target.value))}
-        className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-slate-900 dark:text-white"
+        className={inputSmClass}
       >
         {Array.from({ length: roster.days }, (_, d) => {
           const c = rowOf < 0 ? "" : roster.grid[rowOf][d];
@@ -457,16 +448,13 @@ function AcceptForm({
           );
         })}
       </select>
-      <span className="pb-1.5 text-slate-400">giving {label(cell)}</span>
-      <button
-        onClick={onSubmit}
-        className="rounded-lg bg-teal-600 px-3 py-1.5 font-medium text-white hover:bg-teal-700"
-      >
+      <span className="pb-1.5 text-zinc-400">giving {label(cell)}</span>
+      <Button size="sm" onClick={onSubmit}>
         Check and send
-      </button>
-      <button onClick={onCancel} className="pb-1.5 text-slate-400 hover:text-slate-600">
+      </Button>
+      <TextButton onClick={onCancel} className="pb-1.5">
         Cancel
-      </button>
+      </TextButton>
     </div>
   );
 }

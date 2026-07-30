@@ -4,6 +4,22 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyRow,
+  Field,
+  Input,
+  ListCard,
+  LoadingState,
+  Select,
+  TextButton,
+  inputSmClass,
+  thClass,
+  theadRowClass,
+} from "@/components/ui";
 
 interface Role {
   id: string;
@@ -189,24 +205,24 @@ export default function WardDetailPage() {
 
   const config = scoped?.scope === scope ? scoped : null;
 
-  if (error) return <p className="text-red-600">{error}</p>;
-  if (!ward) return <p className="text-slate-500">Loading…</p>;
+  if (error) return <Alert tone="error">{error}</Alert>;
+  if (!ward) return <LoadingState label="Loading ward…" />;
 
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/wards" className="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors">
+        <Link href="/wards" className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
           &larr; All wards
         </Link>
-        <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">{ward.name}</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
+        <h1 className="mt-1 text-2xl font-bold text-zinc-900 dark:text-white">{ward.name}</h1>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
           {ward.category} · {ward.cycleLengthDays}-day cycle ·{" "}
           {ward.shiftDefinitions.length} shift
           {ward.shiftDefinitions.length === 1 ? "" : "s"}
         </p>
       </div>
 
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex gap-6 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800">
         {(
           [
             ["staff", `Staff (${ward.staff.length})`],
@@ -218,10 +234,10 @@ export default function WardDetailPage() {
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`rounded-t-xl px-5 py-2.5 text-sm font-medium transition-colors ${
+            className={`-mb-px whitespace-nowrap border-b-2 px-1 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
               tab === t
-                ? "border border-b-0 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-400"
-                : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                ? "border-emerald-500 text-emerald-700 dark:text-emerald-400"
+                : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
             }`}
           >
             {label}
@@ -230,15 +246,15 @@ export default function WardDetailPage() {
       </div>
 
       {tab !== "staff" && groups.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/60">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/60">
           <label className="flex flex-wrap items-center gap-3 text-sm">
-            <span className="font-medium text-slate-700 dark:text-slate-300">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
               Editing config for
             </span>
             <select
               value={scope}
               onChange={(e) => setScope(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+              className={inputSmClass}
             >
               <option value="">the whole ward</option>
               {groups.map((g) => (
@@ -248,7 +264,7 @@ export default function WardDetailPage() {
               ))}
             </select>
             {scope && (
-              <span className="text-xs text-slate-500 dark:text-slate-400">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
                 {inheritLabel(tab, config)}
               </span>
             )}
@@ -256,7 +272,7 @@ export default function WardDetailPage() {
         </div>
       )}
 
-      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
+      {notice && <Alert tone="success">{notice}</Alert>}
 
       {tab === "staff" && (
         <StaffTab
@@ -391,8 +407,8 @@ function StaffTab({
 
   if (roles.length === 0) {
     return (
-      <p className="text-sm text-slate-500">
-        Create at least one <Link href="/roles" className="text-teal-700 underline">role</Link>{" "}
+      <p className="text-sm text-zinc-500">
+        Create at least one <Link href="/roles" className="text-emerald-700 underline">role</Link>{" "}
         (e.g. Doctor, Nurse) before adding staff.
       </p>
     );
@@ -401,65 +417,53 @@ function StaffTab({
   return (
     <div className="space-y-6">
       <form onSubmit={addStaff} className="flex flex-wrap gap-3">
-        <input
+        <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Staff name"
-          className="w-64 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
+          className="w-64"
         />
-        <select
-          value={roleId || roles[0]?.id}
-          onChange={(e) => setRoleId(e.target.value)}
-          className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm text-slate-900 dark:text-white shadow-sm"
-        >
+        <Select value={roleId || roles[0]?.id} onChange={(e) => setRoleId(e.target.value)}>
           {roles.map((r) => (
             <option key={r.id} value={r.id}>
               {r.name}
             </option>
           ))}
-        </select>
+        </Select>
         {tiers.length > 0 && (
-          <select
-            value={tierId}
-            onChange={(e) => setTierId(e.target.value)}
-            className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm text-slate-900 dark:text-white shadow-sm"
-          >
+          <Select value={tierId} onChange={(e) => setTierId(e.target.value)}>
             <option value="">No tier</option>
             {tiers.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
             ))}
-          </select>
+          </Select>
         )}
-        <button className="rounded-xl bg-teal-600 px-5 py-2 text-sm font-medium text-white hover:bg-teal-700 shadow-sm shadow-teal-600/20 transition-all">
-          Add staff
-        </button>
+        <Button type="submit">Add staff</Button>
       </form>
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {error && <Alert tone="error">{error}</Alert>}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-        {ward.staff.length === 0 && (
-          <p className="px-5 py-8 text-center text-sm text-slate-500 dark:text-slate-400">No staff yet.</p>
-        )}
+      <ListCard>
+        {ward.staff.length === 0 && <EmptyRow>No staff yet.</EmptyRow>}
         {ward.staff.map((s) => (
           <div
             key={s.id}
-            className="border-b border-slate-100 dark:border-slate-800/50 px-5 py-4 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+            className="px-5 py-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
           >
             <div className="flex items-center justify-between">
               <div className="flex flex-wrap items-center gap-3">
-                <span className={`font-medium ${s.active ? "text-slate-900 dark:text-white" : "text-slate-400 dark:text-slate-600 line-through"}`}>
+                <span className={`font-medium ${s.active ? "text-zinc-900 dark:text-white" : "text-zinc-400 dark:text-zinc-600 line-through"}`}>
                   {s.name}
                 </span>
-                <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400">
+                <Badge tone="neutral" className="font-medium">
                   {s.role.name}
-                </span>
+                </Badge>
                 {tiers.length > 0 && (
                   <select
                     value={s.tierId ?? ""}
                     onChange={(e) => changeTier(s.id, e.target.value)}
-                    className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400"
+                    className={`${inputSmClass} px-2 py-0.5 text-xs`}
                   >
                     <option value="">No tier</option>
                     {tiers.map((t) => (
@@ -474,33 +478,27 @@ function StaffTab({
                 <button
                   onClick={() => toggleLead(s)}
                   title="Whether this person can be put in charge of a shift"
-                  className={
+                  className={`rounded text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
                     s.canBeLead
-                      ? "text-teal-700 dark:text-teal-400"
-                      : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                  }
+                      ? "text-emerald-700 dark:text-emerald-400"
+                      : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                  }`}
                 >
                   {s.canBeLead ? "Can lead ✓" : "Can lead"}
                 </button>
-                <button
-                  onClick={() => toggleActive(s)}
-                  className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
-                >
+                <TextButton onClick={() => toggleActive(s)}>
                   {s.active ? "Deactivate" : "Activate"}
-                </button>
-                <button
-                  onClick={() => removeStaff(s.id, s.name)}
-                  className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                >
+                </TextButton>
+                <TextButton tone="danger" onClick={() => removeStaff(s.id, s.name)}>
                   Delete
-                </button>
+                </TextButton>
               </div>
             </div>
             {otherWards.length > 0 && (
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-400 dark:text-slate-500">Can also work:</span>
+                <span className="text-zinc-400 dark:text-zinc-500">Can also work:</span>
                 {s.floatWards.length === 0 && (
-                  <span className="text-slate-400 dark:text-slate-600">this ward only</span>
+                  <span className="text-zinc-400 dark:text-zinc-600">this ward only</span>
                 )}
                 {s.floatWards.map((fw) => (
                   <button
@@ -512,10 +510,10 @@ function StaffTab({
                       )
                     }
                     title="Remove"
-                    className="group flex items-center gap-1 rounded-md bg-teal-50 dark:bg-teal-500/10 px-2 py-0.5 text-teal-700 dark:text-teal-300 hover:bg-rose-50 dark:hover:bg-rose-500/10 hover:text-rose-700 dark:hover:text-rose-300"
+                    className="group flex items-center gap-1 rounded-md bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 text-emerald-700 dark:text-emerald-300 hover:bg-rose-50 dark:hover:bg-rose-500/10 hover:text-rose-700 dark:hover:text-rose-300"
                   >
                     {fw.ward.name}
-                    <span className="text-teal-400 group-hover:text-rose-500">&times;</span>
+                    <span className="text-emerald-400 group-hover:text-rose-500">&times;</span>
                   </button>
                 ))}
                 <select
@@ -524,7 +522,7 @@ function StaffTab({
                     e.target.value &&
                     setFloatWards(s, [...s.floatWards.map((x) => x.wardId), e.target.value])
                   }
-                  className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-1.5 py-0.5 text-xs text-slate-500 dark:text-slate-400"
+                  className={`${inputSmClass} px-1.5 py-0.5 text-xs`}
                 >
                   <option value="">+ ward</option>
                   {otherWards
@@ -539,42 +537,42 @@ function StaffTab({
             )}
           </div>
         ))}
-      </div>
+      </ListCard>
 
       {ward.floatStaff.length > 0 && (
         <div>
-          <h2 className="mb-1 text-sm font-semibold text-slate-900 dark:text-white">
+          <h2 className="mb-1 text-sm font-semibold text-zinc-900 dark:text-white">
             Also available here
           </h2>
-          <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
             Based in another ward but eligible to be rostered here. They can&apos;t be
             booked on a day they&apos;re already working elsewhere.
           </p>
-          <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+          <ListCard>
             {ward.floatStaff.map(({ staff: fs }) => (
               <div
                 key={fs.id}
-                className="flex flex-wrap items-center gap-3 border-b border-slate-100 dark:border-slate-800/50 px-5 py-3 last:border-0 text-sm"
+                className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm"
               >
-                <span className="font-medium text-slate-900 dark:text-white">{fs.name}</span>
-                <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs text-slate-600 dark:text-slate-400">
+                <span className="font-medium text-zinc-900 dark:text-white">{fs.name}</span>
+                <Badge tone="neutral" className="font-medium">
                   {fs.role.name}
-                </span>
+                </Badge>
                 {fs.tier && (
-                  <span className="text-xs text-slate-500 dark:text-slate-400">{fs.tier.name}</span>
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">{fs.tier.name}</span>
                 )}
-                <span className="text-xs text-slate-400 dark:text-slate-500">
+                <span className="text-xs text-zinc-400 dark:text-zinc-500">
                   based in{" "}
                   <Link
                     href={`/wards/${fs.ward.id}`}
-                    className="underline hover:text-slate-600 dark:hover:text-slate-300"
+                    className="underline hover:text-zinc-600 dark:hover:text-zinc-300"
                   >
                     {fs.ward.name}
                   </Link>
                 </span>
               </div>
             ))}
-          </div>
+          </ListCard>
         </div>
       )}
     </div>
@@ -681,7 +679,7 @@ function CoverageTab({
 
   if (shifts.length === 0) {
     return (
-      <p className="text-sm text-slate-500 dark:text-slate-400">
+      <p className="text-sm text-zinc-500 dark:text-zinc-400">
         Define this ward&apos;s shifts first on the <b>Shifts</b> tab.
       </p>
     );
@@ -691,12 +689,12 @@ function CoverageTab({
     const key = cellKey(shiftCode, scope);
     return (
       <td key={shiftCode} className="px-5 py-3">
-        <input
+        <Input
           type="number"
           min={0}
           value={values[key] ?? 0}
           onChange={(e) => setValues((v) => ({ ...v, [key]: Number(e.target.value) }))}
-          className="w-20 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
+          className="w-20"
         />
       </td>
     );
@@ -719,8 +717,8 @@ function CoverageTab({
                 title={everyDay ? "Applies every day — click to restrict" : label}
                 className={`h-6 w-6 rounded text-[10px] font-medium transition-colors ${
                   on
-                    ? "bg-teal-100 text-teal-800 dark:bg-teal-500/20 dark:text-teal-300"
-                    : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600"
+                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300"
+                    : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-600"
                 }`}
               >
                 {label}
@@ -733,7 +731,7 @@ function CoverageTab({
               setScoping((m) => ({ ...m, [scope]: { ...sc, holidayRule: e.target.value } }))
             }
             title="How public holidays are treated"
-            className="ml-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-600 dark:text-slate-400"
+            className={`${inputSmClass} ml-2 px-1.5 py-0.5 text-[11px]`}
           >
             <option value="SAME">holidays: as normal</option>
             <option value="EXCLUDE">holidays: closed</option>
@@ -746,42 +744,42 @@ function CoverageTab({
 
   return (
     <div className="max-w-5xl space-y-5">
-      <p className="text-sm text-slate-500 dark:text-slate-400">
+      <p className="text-sm text-zinc-500 dark:text-zinc-400">
         Minimum staff on duty for each shift. Role rows cover skill mix;
         tier rows set a seniority floor (e.g. at least one senior on every shift),
         and both are enforced together. Use <span className="font-medium">Applies on</span>{" "}
         to limit a requirement to certain days — a clinic that shuts at the weekend, or
         lighter cover on public holidays.
       </p>
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+      <Card className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-left text-slate-700 dark:text-slate-300">
-              <th className="px-5 py-3 font-medium">Requirement</th>
+            <tr className={theadRowClass}>
+              <th className={`${thClass} px-5`}>Requirement</th>
               {shifts.map((sd) => (
-                <th key={sd.id} className="px-5 py-3 font-medium">
+                <th key={sd.id} className={`${thClass} px-5`}>
                   {sd.label}
                 </th>
               ))}
-              <th className="px-5 py-3 font-medium">Applies on</th>
+              <th className={`${thClass} px-5`}>Applies on</th>
             </tr>
           </thead>
           <tbody>
             {displayRoles.map((r) => (
               <tr
                 key={r.id}
-                className="border-b border-slate-100 dark:border-slate-800/50 hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors"
+                className="border-b border-zinc-100 dark:border-zinc-800/50 hover:bg-zinc-50/50 dark:hover:bg-zinc-800/20 transition-colors"
               >
-                <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">{r.name}</td>
+                <td className="px-5 py-3 font-medium text-zinc-900 dark:text-white">{r.name}</td>
                 {shifts.map((sd) => cellFor(sd.code, rowKey('role', r.id)))}
                 {dayPickerFor(rowKey('role', r.id))}
               </tr>
             ))}
             {tiers.length > 0 && (
-              <tr className="border-b border-slate-100 dark:border-slate-800/50 bg-slate-50/60 dark:bg-slate-800/30">
+              <tr className="border-b border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/60 dark:bg-zinc-800/30">
                 <td
                   colSpan={shifts.length + 2}
-                  className="px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                  className="px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
                 >
                   Seniority floors
                 </td>
@@ -790,11 +788,11 @@ function CoverageTab({
             {tiers.map((t) => (
               <tr
                 key={t.id}
-                className="border-b border-slate-100 dark:border-slate-800/50 last:border-0 hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors"
+                className="border-b border-zinc-100 dark:border-zinc-800/50 last:border-0 hover:bg-zinc-50/50 dark:hover:bg-zinc-800/20 transition-colors"
               >
-                <td className="px-5 py-3 font-medium text-slate-900 dark:text-white">
+                <td className="px-5 py-3 font-medium text-zinc-900 dark:text-white">
                   {t.name}
-                  <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">
+                  <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">
                     any role
                   </span>
                 </td>
@@ -804,15 +802,11 @@ function CoverageTab({
             ))}
           </tbody>
         </table>
-      </div>
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-      <button
-        onClick={save}
-        disabled={saving}
-        className="rounded-xl bg-teal-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm shadow-teal-600/20 transition-all"
-      >
+      </Card>
+      {error && <Alert tone="error">{error}</Alert>}
+      <Button onClick={save} loading={saving}>
         {saving ? 'Saving…' : 'Save coverage'}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -850,22 +844,20 @@ function RulesTab({
     >,
     hint: string,
   ) => (
-    <label className="block">
-      <span className="text-sm font-medium text-slate-900 dark:text-white">{label}</span>
-      <input
+    <Field label={label} hint={hint}>
+      <Input
         type="number"
         min={0}
         value={rules[key]}
         onChange={(e) => setRules((r) => ({ ...r, [key]: Number(e.target.value) }))}
-        className="mt-1.5 block w-28 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
+        className="block w-28"
       />
-      <span className="mt-1.5 block text-xs text-slate-500 dark:text-slate-400">{hint}</span>
-    </label>
+    </Field>
   );
 
   return (
     <div className="space-y-8">
-      <div className="max-w-xl space-y-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+      <Card className="max-w-xl space-y-6 p-6">
       {numField(
         "Max consecutive working days",
         "maxConsecutiveDays",
@@ -886,12 +878,12 @@ function RulesTab({
         "minDaysOffPerWeek",
         "Guaranteed days off in every full week.",
       )}
-      <label className="block">
-        <span className="text-sm font-medium text-slate-900 dark:text-white">
-          Minimum rest between shifts
-        </span>
-        <div className="mt-1.5 flex items-center gap-2">
-          <input
+      <Field
+        label="Minimum rest between shifts"
+        hint="Computed from each shift's actual times, so it catches any too-quick turnaround — not just a morning after a night. Leave blank to disable."
+      >
+        <div className="flex items-center gap-2">
+          <Input
             type="number"
             min={0}
             max={24}
@@ -903,22 +895,17 @@ function RulesTab({
                 minRestHours: e.target.value === "" ? null : Number(e.target.value),
               }))
             }
-            className="w-28 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
+            className="w-28"
           />
-          <span className="text-sm text-slate-500 dark:text-slate-400">hours</span>
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">hours</span>
         </div>
-        <span className="mt-1.5 block text-xs text-slate-500 dark:text-slate-400">
-          Computed from each shift&apos;s actual times, so it catches any
-          too-quick turnaround — not just a morning after a night. Leave blank to
-          disable.
-        </span>
-      </label>
-      <label className="block">
-        <span className="text-sm font-medium text-slate-900 dark:text-white">
-          Balance fairness over
-        </span>
-        <div className="mt-1.5 flex items-center gap-2">
-          <input
+      </Field>
+      <Field
+        label="Balance fairness over"
+        hint="Counts nights, weekends and holidays already worked in published rosters, so shares even out across periods instead of resetting each time. 0 judges each roster on its own."
+      >
+        <div className="flex items-center gap-2">
+          <Input
             type="number"
             min={0}
             max={365}
@@ -926,24 +913,15 @@ function RulesTab({
             onChange={(e) =>
               setRules((r) => ({ ...r, fairnessWindowDays: Number(e.target.value) }))
             }
-            className="w-28 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500 shadow-sm"
+            className="w-28"
           />
-          <span className="text-sm text-slate-500 dark:text-slate-400">days of history</span>
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">days of history</span>
         </div>
-        <span className="mt-1.5 block text-xs text-slate-500 dark:text-slate-400">
-          Counts nights, weekends and holidays already worked in published rosters, so
-          shares even out across periods instead of resetting each time. 0 judges each
-          roster on its own.
-        </span>
-      </label>
-      <button
-        onClick={save}
-        disabled={saving}
-        className="rounded-xl bg-teal-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm shadow-teal-600/20 transition-all"
-      >
+      </Field>
+      <Button onClick={save} loading={saving}>
         {saving ? "Saving…" : "Save rules"}
-      </button>
-      </div>
+      </Button>
+      </Card>
       <ExtraRulesPanel key={`extra-${groupId}`} ward={ward} groupId={groupId} tiers={tiers} />
     </div>
   );
@@ -1050,102 +1028,89 @@ function ExtraRulesPanel({
   return (
     <div className="max-w-xl space-y-4">
       <div>
-        <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Additional rules</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Additional rules</h2>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
           Rules that need their own setting, and can apply to one tier or one shift
           rather than the whole ward.
         </p>
       </div>
 
-      <form
-        onSubmit={add}
-        className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm"
-      >
-        <select
-          value={type}
-          onChange={(e) => {
-            setType(e.target.value);
-            setParamValue(RULE_INFO[e.target.value].param?.default ?? 0);
-          }}
-          className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
-        >
-          {Object.entries(RULE_INFO).map(([key, v]) => (
-            <option key={key} value={key}>
-              {v.label}
-            </option>
-          ))}
-        </select>
-        <div className="flex flex-wrap items-end gap-3 text-sm">
-          {info.param && (
+      <Card className="p-4">
+        <form onSubmit={add} className="space-y-3">
+          <Select
+            value={type}
+            onChange={(e) => {
+              setType(e.target.value);
+              setParamValue(RULE_INFO[e.target.value].param?.default ?? 0);
+            }}
+            className="w-full"
+          >
+            {Object.entries(RULE_INFO).map(([key, v]) => (
+              <option key={key} value={key}>
+                {v.label}
+              </option>
+            ))}
+          </Select>
+          <div className="flex flex-wrap items-end gap-3 text-sm">
+            {info.param && (
+              <label className="block">
+                <span className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                  {info.param.label}
+                </span>
+                <Input
+                  type="number"
+                  min={1}
+                  value={paramValue}
+                  onChange={(e) => setParamValue(Number(e.target.value))}
+                  className="w-24"
+                />
+              </label>
+            )}
             <label className="block">
-              <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">
-                {info.param.label}
-              </span>
-              <input
-                type="number"
-                min={1}
-                value={paramValue}
-                onChange={(e) => setParamValue(Number(e.target.value))}
-                className="w-24 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
-              />
+              <span className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">applies to</span>
+              <Select value={tierId} onChange={(e) => setTierId(e.target.value)}>
+                <option value="">every tier</option>
+                {tiers.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
             </label>
-          )}
-          <label className="block">
-            <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">applies to</span>
-            <select
-              value={tierId}
-              onChange={(e) => setTierId(e.target.value)}
-              className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
-            >
-              <option value="">every tier</option>
-              {tiers.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs text-slate-500 dark:text-slate-400">on</span>
-            <select
-              value={shiftCode}
-              onChange={(e) => setShiftCode(e.target.value)}
-              className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white"
-            >
-              <option value="">every shift</option>
-              {ward.shiftDefinitions.map((sd) => (
-                <option key={sd.id} value={sd.code}>
-                  {sd.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">
-            Add rule
-          </button>
-        </div>
-      </form>
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+            <label className="block">
+              <span className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">on</span>
+              <Select value={shiftCode} onChange={(e) => setShiftCode(e.target.value)}>
+                <option value="">every shift</option>
+                {ward.shiftDefinitions.map((sd) => (
+                  <option key={sd.id} value={sd.code}>
+                    {sd.label}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <Button type="submit">Add rule</Button>
+          </div>
+        </form>
+      </Card>
+      {error && <Alert tone="error">{error}</Alert>}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+      <ListCard>
         {loading && (
-          <p className="px-5 py-6 text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+          <p className="px-5 py-6 text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
         )}
         {!loading && rules.length === 0 && (
-          <p className="px-5 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
-            No additional rules on this ward.
-          </p>
+          <EmptyRow>No additional rules on this ward.</EmptyRow>
         )}
         {rules.map((r) => (
           <div
             key={r.id}
-            className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800/50 px-5 py-3 last:border-0"
+            className="flex items-start justify-between gap-3 px-5 py-3"
           >
             <div className={r.enabled ? "" : "opacity-50"}>
-              <p className="text-sm font-medium text-slate-900 dark:text-white">
+              <p className="text-sm font-medium text-zinc-900 dark:text-white">
                 {RULE_INFO[r.type]?.label ?? r.type}
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
                 {RULE_INFO[r.type]?.describe(r.params ?? {}) ?? ""}
                 {r.tier ? " · " + r.tier.name + " only" : ""}
                 {r.shiftCode ? " · " + r.shiftCode + " only" : ""}
@@ -1153,22 +1118,16 @@ function ExtraRulesPanel({
               </p>
             </div>
             <div className="flex shrink-0 gap-3 text-xs">
-              <button
-                onClick={() => toggle(r)}
-                className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
-              >
+              <TextButton onClick={() => toggle(r)}>
                 {r.enabled ? "Disable" : "Enable"}
-              </button>
-              <button
-                onClick={() => remove(r.id)}
-                className="text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-              >
+              </TextButton>
+              <TextButton tone="danger" onClick={() => remove(r.id)}>
                 Delete
-              </button>
+              </TextButton>
             </div>
           </div>
         ))}
-      </div>
+      </ListCard>
     </div>
   );
 }
@@ -1264,88 +1223,76 @@ function ShiftsTab({
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div className="grid gap-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm sm:grid-cols-2">
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium text-slate-900 dark:text-white">
-            Ward type
-          </span>
-          <input
+      <Card className="grid gap-4 p-5 sm:grid-cols-2">
+        <Field label="Ward type" hint="Your own label — purely descriptive.">
+          <Input
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             placeholder="e.g. Standard, Call Duty, Outpatient Clinic"
-            className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500"
+            className="w-full"
           />
-          <span className="mt-1.5 block text-xs text-slate-500 dark:text-slate-400">
-            Your own label — purely descriptive.
-          </span>
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium text-slate-900 dark:text-white">
-            Roster cycle length
-          </span>
+        </Field>
+        <Field
+          label="Roster cycle length"
+          hint="Default length when generating a roster: 7 for weekly, 30 for a monthly stretch."
+        >
           <div className="flex items-center gap-2">
-            <input
+            <Input
               type="number"
               min={1}
               max={62}
               value={cycleLengthDays}
               onChange={(e) => setCycleLengthDays(Number(e.target.value))}
-              className="w-28 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500"
+              className="w-28"
             />
-            <span className="text-sm text-slate-500 dark:text-slate-400">days</span>
+            <span className="text-sm text-zinc-500 dark:text-zinc-400">days</span>
           </div>
-          <span className="mt-1.5 block text-xs text-slate-500 dark:text-slate-400">
-            Default length when generating a roster: 7 for weekly, 30 for a monthly stretch.
-          </span>
-        </label>
-      </div>
+        </Field>
+      </Card>
 
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">
             Shifts in this ward
           </h2>
-          <button
-            onClick={addShift}
-            className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
-          >
+          <Button variant="secondary" size="sm" onClick={addShift}>
             + Add shift
-          </button>
+          </Button>
         </div>
-        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+        <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
           A shift ending at or before its start time is treated as running past
           midnight. Mark overnight shifts as nights so the night caps, rest rules
           and fairness balancing apply to them.
         </p>
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        <Card className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-left text-slate-700 dark:text-slate-300">
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Code</th>
-                <th className="px-4 py-3 font-medium">Start</th>
-                <th className="px-4 py-3 font-medium">End</th>
-                <th className="px-4 py-3 font-medium">Night</th>
-                <th className="px-4 py-3 font-medium">Payroll tag</th>
+              <tr className={theadRowClass}>
+                <th className={thClass}>Name</th>
+                <th className={thClass}>Code</th>
+                <th className={thClass}>Start</th>
+                <th className={thClass}>End</th>
+                <th className={thClass}>Night</th>
+                <th className={thClass}>Payroll tag</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {shifts.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
                     No shifts — a ward needs at least one to be rostered.
                   </td>
                 </tr>
               )}
               {shifts.map((s, i) => (
-                <tr key={i} className="border-b border-slate-100 dark:border-slate-800/50 last:border-0">
+                <tr key={i} className="border-b border-zinc-100 dark:border-zinc-800/50 last:border-0">
                   <td className="px-4 py-2">
                     <input
                       value={s.label}
                       onChange={(e) => update(i, { label: e.target.value })}
                       placeholder="Morning"
-                      className="w-32 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500"
+                      className={`${inputSmClass} w-32`}
                     />
                   </td>
                   <td className="px-4 py-2">
@@ -1353,7 +1300,7 @@ function ShiftsTab({
                       value={s.code}
                       onChange={(e) => update(i, { code: e.target.value })}
                       placeholder="MORNING"
-                      className="w-32 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-900 dark:text-white outline-none focus:border-teal-500"
+                      className={`${inputSmClass} w-32 font-mono text-xs`}
                     />
                   </td>
                   <td className="px-4 py-2">
@@ -1361,7 +1308,7 @@ function ShiftsTab({
                       type="time"
                       value={toTimeValue(s.startMinutes)}
                       onChange={(e) => update(i, { startMinutes: fromTimeValue(e.target.value) })}
-                      className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500"
+                      className={inputSmClass}
                     />
                   </td>
                   <td className="px-4 py-2">
@@ -1369,10 +1316,10 @@ function ShiftsTab({
                       type="time"
                       value={toTimeValue(s.endMinutes)}
                       onChange={(e) => update(i, { endMinutes: fromTimeValue(e.target.value) })}
-                      className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm text-slate-900 dark:text-white outline-none focus:border-teal-500"
+                      className={inputSmClass}
                     />
                     {s.endMinutes <= s.startMinutes && (
-                      <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">
                         next day
                       </span>
                     )}
@@ -1382,7 +1329,7 @@ function ShiftsTab({
                       type="checkbox"
                       checked={s.isNightLike}
                       onChange={(e) => update(i, { isNightLike: e.target.checked })}
-                      className="h-4 w-4 accent-teal-600"
+                      className="h-4 w-4 rounded accent-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
                     />
                   </td>
                   <td className="px-4 py-2">
@@ -1390,32 +1337,25 @@ function ShiftsTab({
                       value={s.payrollTag ?? ""}
                       onChange={(e) => update(i, { payrollTag: e.target.value || null })}
                       placeholder="optional"
-                      className="w-36 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-teal-500"
+                      className={`${inputSmClass} w-36 text-xs`}
                     />
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <button
-                      onClick={() => removeShift(i)}
-                      className="text-xs text-slate-400 hover:text-red-600 dark:hover:text-red-400"
-                    >
+                    <TextButton tone="danger" onClick={() => removeShift(i)}>
                       Remove
-                    </button>
+                    </TextButton>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       </div>
 
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-      <button
-        onClick={save}
-        disabled={saving}
-        className="rounded-xl bg-teal-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 shadow-sm shadow-teal-600/20 transition-all"
-      >
+      {error && <Alert tone="error">{error}</Alert>}
+      <Button onClick={save} loading={saving}>
         {saving ? "Saving…" : "Save shifts & settings"}
-      </button>
+      </Button>
     </div>
   );
 }
